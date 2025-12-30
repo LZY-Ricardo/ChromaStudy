@@ -61,6 +61,33 @@ export function removeOpsById(ids) {
   writeAll(queue)
 }
 
+export function updateOpById(id, updates) {
+  if (typeof window === 'undefined') return null
+  if (!id || !updates || typeof updates !== 'object') return null
+
+  const queue = readAll()
+  let updated = null
+
+  const next = queue.map((op) => {
+    if (op?.id !== id) return op
+
+    updated = {
+      ...op,
+      ...updates,
+      id: op.id,
+      type: op.type,
+      userId: op.userId,
+      createdAt: op.createdAt,
+    }
+
+    return updated
+  })
+
+  if (!updated) return null
+  writeAll(next)
+  return updated
+}
+
 export function replaceQueuedTaskId(userId, tempId, actualId) {
   if (typeof window === 'undefined') return
   const id = Number(userId)

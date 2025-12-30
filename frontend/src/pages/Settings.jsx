@@ -1,8 +1,14 @@
 import { useMemo, useRef, useState } from 'react'
-import { Button, Card, Dialog, Input, List, Selector, Switch, Toast } from 'antd-mobile'
+import { Button, Card, Dialog, Input, List, Selector, Switch, TextArea, Toast } from 'antd-mobile'
 import { loadAiConfig, saveAiConfig } from '../utils/storage.js'
 import { loadWeeklyGoal, saveWeeklyGoal } from '../utils/habit.js'
-import { clearPendingOps, getPendingOps, getPendingOpsCount, removeOpsById } from '../utils/syncQueue.js'
+import {
+  clearPendingOps,
+  getPendingOps,
+  getPendingOpsCount,
+  removeOpsById,
+  updateOpById,
+} from '../utils/syncQueue.js'
 
 const defaultAiConfig = {
   provider: 'ollama',
@@ -23,6 +29,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
   const [, bumpLocalRender] = useState(0)
   const [pendingOpen, setPendingOpen] = useState(false)
   const [detailOp, setDetailOp] = useState(null)
+  const [detailDraft, setDetailDraft] = useState(null)
   const [importOpen, setImportOpen] = useState(false)
   const [importCandidate, setImportCandidate] = useState(null)
   const [importOptions, setImportOptions] = useState(null)
@@ -47,6 +54,11 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
   const pendingOps = user?.id
     ? getPendingOps(user.id).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
     : []
+  const blockedOpId = lastSync?.blockedOp?.id
+  const blockedOp =
+    blockedOpId && pendingOps.length
+      ? pendingOps.find((op) => op?.id === blockedOpId) ?? lastSync?.blockedOp
+      : lastSync?.blockedOp
   let lastSyncLabel = ''
   if (lastSync?.at) {
     try {
@@ -131,6 +143,188 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     }
   }
 
+  const makeDetailDraft = (op) => {
+    const type = op?.type
+    const payload = op?.payload || {}
+
+    if (type === 'checkin') {
+      const mode = payload?.mode === 'increment' ? 'increment' : 'replace'
+      const generateFeedback =
+        typeof payload?.generateFeedback === 'boolean' ? payload.generateFeedback : mode === 'replace'
+
+      return {
+        type: 'checkin',
+        date: payload?.date ? String(payload.date) : '',
+        mode,
+        duration: payload?.duration != null ? String(payload.duration) : '',
+        content: payload?.content != null ? String(payload.content) : '',
+        generateFeedback,
+      }
+    }
+
+    if (type === 'task_create') {
+      return {
+        type: 'task_create',
+        title: payload?.title != null ? String(payload.title) : '',
+      }
+    }
+
+    if (type === 'task_update') {
+      const updates = payload?.updates && typeof payload.updates === 'object' ? payload.updates : {}
+      const isDone =
+        typeof updates.isDone === 'boolean' ? (updates.isDone ? 'done' : 'todo') : 'keep'
+      return {
+        type: 'task_update',
+        id: payload?.id != null ? String(payload.id) : '',
+        title: typeof updates.title === 'string' ? updates.title : '',
+        isDone,
+      }
+    }
+
+    if (type === 'task_delete') {
+      return {
+        type: 'task_delete',
+        id: payload?.id != null ? String(payload.id) : '',
+      }
+    }
+
+    return { type: type || 'unknown' }
+  }
+
+  const openOpDetail = (op) => {
+    if (!op) return
+    setDetailOp(op)
+    setDetailDraft(makeDetailDraft(op))
+  }
+
+  const closeOpDetail = () => {
+    if (syncing) return
+    setDetailOp(null)
+    setDetailDraft(null)
+  }
+
+  const buildUpdatedPayload = () => {
+    if (!detailOp || !detailDraft) return null
+    const type = detailOp.type
+    const original = detailOp.payload && typeof detailOp.payload === 'object' ? detailOp.payload : {}
+
+    if (type === 'checkin') {
+      const date = String(detailDraft.date ?? '').trim()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        Toast.show({ content: '日期格式需要为 YYYY-MM-DD' })
+        return null
+      }
+
+      const mode = detailDraft.mode === 'increment' ? 'increment' : 'replace'
+      const minutes = Number.parseInt(String(detailDraft.duration ?? ''), 10)
+      if (!Number.isInteger(minutes)) {
+        Toast.show({ content: '时长需要是整数（分钟）' })
+        return null
+      }
+      if (mode === 'increment' && minutes <= 0) {
+        Toast.show({ content: '累计模式下时长必须 > 0' })
+        return null
+      }
+      if (mode === 'replace' && minutes < 0) {
+        Toast.show({ content: '覆盖模式下时长必须 >= 0' })
+        return null
+      }
+
+      const content = String(detailDraft.content ?? '').trim()
+      if (mode === 'replace' && !content) {
+        Toast.show({ content: '覆盖模式下内容必填' })
+        return null
+      }
+
+      return {
+        ...original,
+        userId: detailOp.userId,
+        date,
+        duration: minutes,
+        content,
+        mode,
+        generateFeedback: Boolean(detailDraft.generateFeedback),
+      }
+    }
+
+    if (type === 'task_create') {
+      const title = String(detailDraft.title ?? '').trim()
+      if (!title) {
+        Toast.show({ content: '任务标题不能为空' })
+        return null
+      }
+      return { ...original, title }
+    }
+
+    if (type === 'task_update') {
+      const nextId = Number.parseInt(String(detailDraft.id ?? ''), 10)
+      if (!Number.isFinite(nextId)) {
+        Toast.show({ content: '任务 ID 需要是整数' })
+        return null
+      }
+
+      const currentUpdates =
+        original?.updates && typeof original.updates === 'object' ? original.updates : {}
+      const nextUpdates = {}
+
+      const title = String(detailDraft.title ?? '').trim()
+      if (title) {
+        nextUpdates.title = title
+      } else if (typeof currentUpdates.title === 'string') {
+        nextUpdates.title = currentUpdates.title
+      }
+
+      if (detailDraft.isDone === 'done') {
+        nextUpdates.isDone = true
+      } else if (detailDraft.isDone === 'todo') {
+        nextUpdates.isDone = false
+      } else if (typeof currentUpdates.isDone === 'boolean') {
+        nextUpdates.isDone = currentUpdates.isDone
+      }
+
+      if (Object.keys(nextUpdates).length === 0) {
+        Toast.show({ content: '该条更新没有可同步字段' })
+        return null
+      }
+
+      return { ...original, id: nextId, updates: nextUpdates }
+    }
+
+    if (type === 'task_delete') {
+      const nextId = Number.parseInt(String(detailDraft.id ?? ''), 10)
+      if (!Number.isFinite(nextId)) {
+        Toast.show({ content: '任务 ID 需要是整数' })
+        return null
+      }
+      return { ...original, id: nextId }
+    }
+
+    Toast.show({ content: '暂不支持编辑该类型' })
+    return null
+  }
+
+  const saveOpEdits = async ({ syncAfter }) => {
+    if (!detailOp?.id) return
+    const payload = buildUpdatedPayload()
+    if (!payload) return
+
+    const updated = updateOpById(detailOp.id, { payload })
+    if (!updated) {
+      Toast.show({ content: '保存失败：队列中未找到该条' })
+      return
+    }
+
+    setDetailOp(updated)
+    setDetailDraft(makeDetailDraft(updated))
+    bumpLocalRender((v) => v + 1)
+    Toast.show({ content: '已保存修改' })
+
+    if (syncAfter) {
+      closeOpDetail()
+      onSyncNow?.()
+    }
+  }
+
   const exportLocalData = () => {
     if (typeof window === 'undefined') return
     if (!user?.id) return
@@ -171,7 +365,26 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     }
 
     const rawQueue = safeParse(window.localStorage.getItem(queueKey))
-    const pendingOps = Array.isArray(rawQueue) ? rawQueue.filter((op) => op?.userId === userId) : []
+    const scrubAi = (value) => {
+      if (!value || typeof value !== 'object') return value
+      const next = copy(value)
+      if (next?.openai && typeof next.openai === 'object') {
+        next.openai.apiKey = ''
+      }
+      return next
+    }
+
+    const scrubOp = (op) => {
+      const next = copy(op)
+      if (next?.payload?.ai) {
+        next.payload.ai = scrubAi(next.payload.ai)
+      }
+      return next
+    }
+
+    const pendingOps = Array.isArray(rawQueue)
+      ? rawQueue.filter((op) => op?.userId === userId).map(scrubOp)
+      : []
 
     const payload = {
       app: 'ChromaStudy',
@@ -355,13 +568,16 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
         const incomingAi = data.aiConfig && typeof data.aiConfig === 'object' ? data.aiConfig : null
         if (incomingAi) {
           const existing = loadAiConfig()
-          if (
-            existing?.openai?.apiKey &&
-            (!incomingAi?.openai || !incomingAi.openai.apiKey)
-          ) {
-            incomingAi.openai = { ...(incomingAi.openai || {}), apiKey: existing.openai.apiKey }
+          const existingKey =
+            typeof existing?.openai?.apiKey === 'string' ? existing.openai.apiKey : ''
+          const nextAi = JSON.parse(JSON.stringify(incomingAi))
+          if (nextAi?.openai && typeof nextAi.openai === 'object') {
+            nextAi.openai.apiKey = existingKey
+          } else if (existingKey) {
+            nextAi.openai = { ...(nextAi.openai || {}), apiKey: existingKey }
           }
-          const rawAi = safeStringify(incomingAi)
+
+          const rawAi = safeStringify(nextAi)
           if (rawAi) {
             window.localStorage.setItem('chroma_ai', rawAi)
           }
@@ -429,11 +645,22 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
           .map((op) => {
             const type = typeof op?.type === 'string' ? op.type : ''
             if (!type) return null
+            let payload = op?.payload
+            if (payload && typeof payload === 'object') {
+              try {
+                payload = JSON.parse(JSON.stringify(payload))
+              } catch {
+                payload = op?.payload
+              }
+            }
+            if (payload?.ai?.openai && typeof payload.ai.openai === 'object') {
+              payload.ai.openai.apiKey = ''
+            }
             return {
               id: typeof op?.id === 'string' && op.id ? op.id : normalizeId(),
               type,
               userId,
-              payload: op?.payload,
+              payload,
               createdAt: Number(op?.createdAt) || Date.now(),
             }
           })
@@ -598,9 +825,9 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
                     ? ' · 已暂停：网络不可用'
                     : ''}
               </p>
-              {lastSync.blocked === 'conflict' && lastSync?.blockedOp ? (
+              {lastSync.blocked === 'conflict' && blockedOp ? (
                 <p className="text-xs text-amber-600">
-                  阻塞项：{formatOpTitle(lastSync.blockedOp)} {formatOpSummary(lastSync.blockedOp)}{' '}
+                  阻塞项：{formatOpTitle(blockedOp)} {formatOpSummary(blockedOp)}{' '}
                   {lastSync.blockedError ? `· ${lastSync.blockedError}` : ''}
                 </p>
               ) : null}
@@ -621,7 +848,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
           <Button
             block
             fill="outline"
-            disabled={syncing || (pendingCount <= 0 && !lastSync?.blockedOp)}
+            disabled={syncing || (pendingCount <= 0 && !blockedOp)}
             onClick={() => setPendingOpen(true)}
           >
             查看待同步详情
@@ -973,17 +1200,17 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
         actions={[{ key: 'close', text: '关闭' }]}
         content={
           <div className="space-y-3">
-            {lastSync?.blocked === 'conflict' && lastSync?.blockedOp ? (
+            {lastSync?.blocked === 'conflict' && blockedOp ? (
               <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
                 <div className="font-semibold">同步被阻断</div>
                 <div className="mt-1 text-xs">
-                  {formatOpTitle(lastSync.blockedOp)} {formatOpSummary(lastSync.blockedOp)}
+                  {formatOpTitle(blockedOp)} {formatOpSummary(blockedOp)}
                 </div>
                 {lastSync.blockedError ? (
                   <div className="mt-1 break-words text-xs">{lastSync.blockedError}</div>
                 ) : null}
                 <div className="mt-3 flex items-center gap-2">
-                  <Button size="small" fill="outline" onClick={() => setDetailOp(lastSync.blockedOp)}>
+                  <Button size="small" fill="outline" onClick={() => openOpDetail(blockedOp)}>
                     查看/处理阻塞项
                   </Button>
                   <Button size="small" color="primary" onClick={() => onSyncNow?.()} disabled={syncing}>
@@ -1000,7 +1227,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
                     key={op.id}
                     extra={
                       <div className="flex items-center gap-2">
-                        <Button size="small" fill="outline" onClick={() => setDetailOp(op)}>
+                        <Button size="small" fill="outline" onClick={() => openOpDetail(op)}>
                           详情
                         </Button>
                         <Button
@@ -1036,32 +1263,191 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
         title="待同步项"
         closeOnMaskClick={!syncing}
         closeOnAction={false}
-        onClose={() => setDetailOp(null)}
+        onClose={closeOpDetail}
         actions={[
-          { key: 'close', text: '关闭' },
-          { key: 'discard', text: '丢弃该条', disabled: syncing },
-          { key: 'discard_sync', text: '丢弃并继续同步', bold: true, disabled: syncing },
+          { key: 'close', text: '关闭', disabled: syncing },
+          { key: 'save', text: '保存', disabled: syncing || !detailDraft },
+          { key: 'save_sync', text: '保存并继续同步', bold: true, disabled: syncing || !detailDraft },
         ]}
         onAction={(action) => {
           if (!detailOp) return
-          if (action.key === 'discard') {
-            discardOp(detailOp).finally(() => setDetailOp(null))
+          if (action.key === 'save') {
+            saveOpEdits({ syncAfter: false })
             return
           }
-          if (action.key === 'discard_sync') {
-            discardOp(detailOp, { syncAfter: true }).finally(() => setDetailOp(null))
+          if (action.key === 'save_sync') {
+            saveOpEdits({ syncAfter: true })
             return
           }
-          setDetailOp(null)
+          closeOpDetail()
         }}
         content={
-          <div className="space-y-2">
-            <p className="text-sm text-slate-700">
-              {formatOpTitle(detailOp)} {formatOpSummary(detailOp)}
-            </p>
-            <pre className="max-h-[40vh] overflow-auto rounded-xl bg-slate-50 p-3 text-xs text-slate-700">
-              {JSON.stringify(detailOp, null, 2)}
-            </pre>
+          <div className="space-y-3">
+            <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+              <p className="font-semibold text-slate-800">
+                {formatOpTitle(detailOp)} {formatOpSummary(detailOp)}
+              </p>
+              <p className="mt-1">
+                opId：{detailOp.id}
+                {detailOp?.createdAt ? ` · ${new Date(detailOp.createdAt).toLocaleString()}` : ''}
+              </p>
+            </div>
+
+            {detailDraft?.type === 'checkin' ? (
+              <div className="space-y-3">
+                <List>
+                  <List.Item>
+                    <Input
+                      placeholder="日期（YYYY-MM-DD）"
+                      value={detailDraft.date}
+                      onChange={(value) => setDetailDraft((prev) => ({ ...prev, date: value }))}
+                      clearable
+                    />
+                  </List.Item>
+                  <List.Item>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      placeholder="时长（分钟）"
+                      value={detailDraft.duration}
+                      onChange={(value) => setDetailDraft((prev) => ({ ...prev, duration: value }))}
+                      clearable
+                    />
+                  </List.Item>
+                </List>
+
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Mode
+                  </div>
+                  <Selector
+                    options={[
+                      { label: '覆盖', value: 'replace' },
+                      { label: '累计', value: 'increment' },
+                    ]}
+                    value={[detailDraft.mode]}
+                    onChange={(values) =>
+                      setDetailDraft((prev) => ({ ...prev, mode: values[0] ?? 'replace' }))
+                    }
+                  />
+                </div>
+
+                <TextArea
+                  placeholder="内容（覆盖模式必填）"
+                  value={detailDraft.content}
+                  onChange={(value) => setDetailDraft((prev) => ({ ...prev, content: value }))}
+                  rows={4}
+                  showCount
+                  maxLength={500}
+                />
+
+                <List>
+                  <List.Item
+                    extra={
+                      <Switch
+                        checked={Boolean(detailDraft.generateFeedback)}
+                        onChange={(value) =>
+                          setDetailDraft((prev) => ({ ...prev, generateFeedback: value }))
+                        }
+                      />
+                    }
+                  >
+                    同步后生成 AI 点评
+                  </List.Item>
+                </List>
+              </div>
+            ) : null}
+
+            {detailDraft?.type === 'task_create' ? (
+              <List>
+                <List.Item>
+                  <Input
+                    placeholder="任务标题"
+                    value={detailDraft.title}
+                    onChange={(value) => setDetailDraft((prev) => ({ ...prev, title: value }))}
+                    clearable
+                  />
+                </List.Item>
+              </List>
+            ) : null}
+
+            {detailDraft?.type === 'task_update' ? (
+              <div className="space-y-3">
+                <List>
+                  <List.Item>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      placeholder="任务 ID（允许把 - 临时 id 改成真实 id）"
+                      value={detailDraft.id}
+                      onChange={(value) => setDetailDraft((prev) => ({ ...prev, id: value }))}
+                      clearable
+                    />
+                  </List.Item>
+                  <List.Item>
+                    <Input
+                      placeholder="标题（留空表示不改/沿用原值）"
+                      value={detailDraft.title}
+                      onChange={(value) => setDetailDraft((prev) => ({ ...prev, title: value }))}
+                      clearable
+                    />
+                  </List.Item>
+                </List>
+
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    isDone
+                  </div>
+                  <Selector
+                    options={[
+                      { label: '不修改', value: 'keep' },
+                      { label: '完成', value: 'done' },
+                      { label: '未完成', value: 'todo' },
+                    ]}
+                    value={[detailDraft.isDone]}
+                    onChange={(values) =>
+                      setDetailDraft((prev) => ({ ...prev, isDone: values[0] ?? 'keep' }))
+                    }
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {detailDraft?.type === 'task_delete' ? (
+              <List>
+                <List.Item>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    placeholder="任务 ID"
+                    value={detailDraft.id}
+                    onChange={(value) => setDetailDraft((prev) => ({ ...prev, id: value }))}
+                    clearable
+                  />
+                </List.Item>
+              </List>
+            ) : null}
+
+            <div className="flex items-center gap-2">
+              <Button
+                size="small"
+                fill="outline"
+                color="warning"
+                disabled={syncing}
+                onClick={() => discardOp(detailOp)}
+              >
+                丢弃该条
+              </Button>
+              <Button
+                size="small"
+                fill="outline"
+                color="warning"
+                disabled={syncing}
+                onClick={() => discardOp(detailOp, { syncAfter: true })}
+              >
+                丢弃并继续同步
+              </Button>
+            </div>
           </div>
         }
       />
