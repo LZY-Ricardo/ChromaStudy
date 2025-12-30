@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, Input, List, Selector, Toast } from 'antd-mobile'
+import { Button, Card, Dialog, Input, List, Selector, Toast } from 'antd-mobile'
 import { loadAiConfig, saveAiConfig } from '../utils/storage.js'
 import { loadWeeklyGoal, saveWeeklyGoal } from '../utils/habit.js'
+import { clearPendingOps, getPendingOpsCount } from '../utils/syncQueue.js'
 
 const defaultAiConfig = {
   provider: 'ollama',
@@ -16,7 +17,7 @@ const defaultAiConfig = {
   },
 }
 
-function Settings({ user, onLogout }) {
+function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
   const stored = useMemo(() => loadAiConfig(), [])
 
   const [provider, setProvider] = useState(stored?.provider ?? defaultAiConfig.provider)
@@ -34,6 +35,110 @@ function Settings({ user, onLogout }) {
   )
   const [openaiApiKey, setOpenaiApiKey] = useState(stored?.openai?.apiKey ?? '')
   const [weeklyGoal, setWeeklyGoal] = useState(() => loadWeeklyGoal(user?.id))
+  const pendingCount = getPendingOpsCount(user?.id)
+  let lastSyncLabel = ''
+  if (lastSync?.at) {
+    try {
+      lastSyncLabel = new Date(lastSync.at).toLocaleString()
+    } catch {
+      lastSyncLabel = ''
+    }
+  }
+
+  const clearQueue = async () => {
+    if (!user?.id) return
+    if (pendingCount <= 0) return
+
+    const confirmed = await Dialog.confirm({
+      title: '丢弃未同步更改',
+      content: '这会清空待同步队列，离线期间的新增/编辑/删除将不会再同步到服务器。',
+      confirmText: '确认丢弃',
+    })
+
+    if (!confirmed) return
+    clearPendingOps(user.id)
+    Toast.show({ content: '已清空待同步队列' })
+  }
+
+  const exportLocalData = () => {
+    if (typeof window === 'undefined') return
+    if (!user?.id) return
+
+    const safeParse = (raw) => {
+      try {
+        return raw ? JSON.parse(raw) : null
+      } catch {
+        return null
+      }
+    }
+
+    const copy = (value) => (value && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value)
+
+    const aiConfig = copy(loadAiConfig())
+    if (aiConfig?.openai && typeof aiConfig.openai === 'object') {
+      aiConfig.openai.apiKey = ''
+    }
+
+    const userId = user.id
+    const tasksCacheKey = `chroma_cache_tasks_${userId}`
+    const logsCacheKey = `chroma_cache_studyLogs_${userId}`
+    const weeklyGoalKey = `chroma_weekly_goal_${userId}`
+    const taskOrderKey = `chroma_task_order_${userId}`
+    const queueKey = 'chroma_sync_queue_v1'
+    const reviewPrefix = `chroma_review_${userId}_`
+
+    const reviews = {}
+    try {
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const key = window.localStorage.key(i)
+        if (!key || !key.startsWith(reviewPrefix)) continue
+        const date = key.slice(reviewPrefix.length)
+        reviews[date] = safeParse(window.localStorage.getItem(key))
+      }
+    } catch {
+      // ignore
+    }
+
+    const rawQueue = safeParse(window.localStorage.getItem(queueKey))
+    const pendingOps = Array.isArray(rawQueue) ? rawQueue.filter((op) => op?.userId === userId) : []
+
+    const payload = {
+      app: 'ChromaStudy',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      user: { id: userId, username: user?.username ?? '' },
+      data: {
+        aiConfig,
+        weeklyGoal: window.localStorage.getItem(weeklyGoalKey) ?? null,
+        taskOrder: safeParse(window.localStorage.getItem(taskOrderKey)),
+        caches: {
+          tasks: safeParse(window.localStorage.getItem(tasksCacheKey)),
+          studyLogs: safeParse(window.localStorage.getItem(logsCacheKey)),
+        },
+        pendingOps,
+        reviews,
+      },
+      notes: {
+        openaiApiKeyExported: false,
+      },
+    }
+
+    const filenameSafeTime = new Date().toISOString().replace(/[:.]/g, '-')
+    const filename = `chromastudy-backup-u${userId}-${filenameSafeTime}.json`
+
+    try {
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = filename
+      anchor.click()
+      URL.revokeObjectURL(url)
+      Toast.show({ content: '已导出本地数据' })
+    } catch {
+      Toast.show({ content: '导出失败' })
+    }
+  }
 
   const persist = () => {
     const config = {
@@ -123,6 +228,41 @@ function Settings({ user, onLogout }) {
             }}
           >
             退出登录 / 切换账号
+          </Button>
+        </div>
+      </Card>
+
+      <Card title="Sync" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+        <div className="space-y-3">
+          <div className="text-sm text-slate-600">
+            待同步：{pendingCount} 项
+            {typeof navigator !== 'undefined' && !navigator.onLine ? '（离线）' : ''}
+          </div>
+          {lastSync ? (
+            <p className="text-xs text-slate-400">
+              上次同步：{lastSyncLabel || '未知'} · 成功 {lastSync.succeeded}/{lastSync.processed} · 失败{' '}
+              {lastSync.failed}
+            </p>
+          ) : (
+            <p className="text-xs text-slate-400">尚未执行过同步</p>
+          )}
+
+          <Button
+            block
+            color="primary"
+            disabled={syncing || pendingCount <= 0}
+            onClick={() => onSyncNow?.()}
+          >
+            {syncing ? '同步中...' : pendingCount > 0 ? '立即同步' : '暂无待同步'}
+          </Button>
+          <Button
+            block
+            fill="outline"
+            color="warning"
+            disabled={syncing || pendingCount <= 0}
+            onClick={clearQueue}
+          >
+            丢弃未同步更改
           </Button>
         </div>
       </Card>
@@ -254,6 +394,17 @@ function Settings({ user, onLogout }) {
           </Button>
           <p className="text-xs text-slate-400">
             PWA 通知更适合“尽力提醒”；若需要严格定时/重复提醒，后续可升级系统级通知。
+          </p>
+        </div>
+      </Card>
+
+      <Card title="Export" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+        <div className="space-y-3">
+          <Button block fill="outline" onClick={exportLocalData}>
+            导出本地数据（JSON）
+          </Button>
+          <p className="text-xs text-slate-400">
+            包含：任务/打卡缓存、复盘、本地设置、待同步队列；默认不导出云端 API Key。
           </p>
         </div>
       </Card>

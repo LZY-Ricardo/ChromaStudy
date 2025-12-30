@@ -74,7 +74,7 @@ function SortableTaskItem({ task, disabled, onToggle }) {
   )
 }
 
-function Today({ user }) {
+function Today({ user, syncTick }) {
   const navigate = useNavigate()
   const todayLabel = dayjs().format('dddd, MMM D')
   const todayKey = dayjs().format('YYYY-MM-DD')
@@ -109,7 +109,7 @@ function Today({ user }) {
 
   const weeklyGoalMinutes = loadWeeklyGoal(user?.id)
   const weekRange = useMemo(() => {
-    const now = dayjs()
+    const now = dayjs(todayKey)
     const day = now.day() // 0 (Sun) - 6 (Sat)
     const diff = (day + 6) % 7 // Monday=0
     const start = now.subtract(diff, 'day').format('YYYY-MM-DD')
@@ -126,7 +126,7 @@ function Today({ user }) {
   const streakDays = useMemo(() => {
     const map = new Map(logs.map((log) => [log.date, log]))
     let count = 0
-    let cursor = dayjs()
+    let cursor = dayjs(todayKey)
     while (true) {
       const key = cursor.format('YYYY-MM-DD')
       const log = map.get(key)
@@ -167,7 +167,7 @@ function Today({ user }) {
       }
     }
     load()
-  }, [user])
+  }, [syncTick, user?.id])
 
   const pollFeedbackIfNeeded = async () => {
     if (!user?.id) return
@@ -337,7 +337,6 @@ function Today({ user }) {
         const minutes = Number.parseInt(String(item?.estimateMinutes ?? ''), 10)
         const finalTitle =
           Number.isFinite(minutes) && minutes > 0 ? `${title}（约${minutes}m）` : title
-        // eslint-disable-next-line no-await-in-loop
         const task = await createTask(user.id, finalTitle)
         created.push(task)
       }
@@ -372,7 +371,7 @@ function Today({ user }) {
   const handleToggleTask = async (task, value) => {
     setUpdatingTaskId(task.id)
     try {
-      const updated = await updateTask(task.id, { isDone: value })
+      const updated = await updateTask(user.id, task.id, { isDone: value })
       setTasks((prev) => prev.map((item) => (item.id === task.id ? updated : item)))
     } catch {
       Toast.show({ content: '更新任务状态失败' })
@@ -394,7 +393,7 @@ function Today({ user }) {
     }
     setUpdatingTaskId(editingTask.id)
     try {
-      const updated = await updateTask(editingTask.id, { title })
+      const updated = await updateTask(user.id, editingTask.id, { title })
       setTasks((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setEditingTask(null)
       setEditingTitle('')

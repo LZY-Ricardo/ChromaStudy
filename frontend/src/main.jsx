@@ -13,31 +13,32 @@ createRoot(document.getElementById('root')).render(
 if (import.meta.env.DEV && 'serviceWorker' in navigator) {
   const cleanupKey = '__chromastudy_sw_cleanup_done__'
 
-  navigator.serviceWorker
-    .getRegistrations()
-    .then(async (registrations) => {
-      if (!registrations.length) {
-        return
-      }
+  const cleanup = async () => {
+    let didCleanup = false
+
+    const registrations = await navigator.serviceWorker.getRegistrations()
+    if (registrations.length) {
+      didCleanup = true
       await Promise.all(registrations.map((registration) => registration.unregister()))
+    }
 
-      if (navigator.serviceWorker.controller && !sessionStorage.getItem(cleanupKey)) {
-        sessionStorage.setItem(cleanupKey, '1')
-        window.location.reload()
+    if ('caches' in window) {
+      const keys = await window.caches.keys()
+      if (keys.length) {
+        didCleanup = true
+        await Promise.all(keys.map((key) => window.caches.delete(key)))
       }
-    })
-    .catch(() => {
-      // ignore
-    })
+    }
 
-  if ('caches' in window) {
-    window.caches
-      .keys()
-      .then((keys) => Promise.all(keys.map((key) => window.caches.delete(key))))
-      .catch(() => {
-        // ignore
-      })
+    if (didCleanup && !sessionStorage.getItem(cleanupKey)) {
+      sessionStorage.setItem(cleanupKey, '1')
+      window.location.reload()
+    }
   }
+
+  cleanup().catch(() => {
+    // ignore
+  })
 }
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

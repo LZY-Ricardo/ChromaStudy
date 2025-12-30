@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { TabBar } from 'antd-mobile'
+import { TabBar, Toast } from 'antd-mobile'
 import { BarChart3, CalendarDays, Home, MessageCircle, Settings as SettingsIcon } from 'lucide-react'
 import Login from './pages/Login.jsx'
 import Today from './pages/Today.jsx'
@@ -11,6 +11,8 @@ import DayDetail from './pages/DayDetail.jsx'
 import Stats from './pages/Stats.jsx'
 import Focus from './pages/Focus.jsx'
 import { clearUser, loadUser, saveUser } from './utils/storage.js'
+import { syncPendingOps } from './services/api.js'
+import { getPendingOpsCount } from './utils/syncQueue.js'
 
 const tabs = [
   { key: '/', title: 'Today', icon: <Home size={18} /> },
@@ -25,6 +27,59 @@ function Shell() {
   const navigate = useNavigate()
   const activeKey = tabs.find((tab) => tab.key === location.pathname)?.key ?? '/'
   const [user, setUser] = useState(() => loadUser())
+  const [syncTick, setSyncTick] = useState(0)
+  const [syncing, setSyncing] = useState(false)
+  const [lastSync, setLastSync] = useState(null)
+
+  const logout = () => {
+    clearUser()
+    setUser(null)
+  }
+
+  const runSync = useCallback(
+    async (reason = 'manual') => {
+      if (!user?.id) return null
+      if (syncing) return null
+
+      const pending = getPendingOpsCount(user.id)
+      if (pending === 0 && reason !== 'startup') {
+        return { ok: true, processed: 0, succeeded: 0, failed: 0 }
+      }
+
+      setSyncing(true)
+      try {
+        const result = await syncPendingOps(user.id)
+        setLastSync({ at: Date.now(), ...result })
+
+        if (result.processed > 0) {
+          setSyncTick(Date.now())
+          Toast.show({
+            content: `已同步 ${result.succeeded}/${result.processed}，失败 ${result.failed}`,
+          })
+        }
+
+        return result
+      } catch {
+        Toast.show({ content: '同步失败，请稍后重试' })
+        return null
+      } finally {
+        setSyncing(false)
+      }
+    },
+    [syncing, user]
+  )
+
+  useEffect(() => {
+    if (!user?.id) return
+    runSync('startup')
+  }, [runSync, user?.id])
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+    const handler = () => runSync('online')
+    window.addEventListener('online', handler)
+    return () => window.removeEventListener('online', handler)
+  }, [runSync, user?.id])
 
   if (!user?.id) {
     return (
@@ -35,11 +90,6 @@ function Shell() {
         }}
       />
     )
-  }
-
-  const logout = () => {
-    clearUser()
-    setUser(null)
   }
 
   const hideTabBar = location.pathname.startsWith('/day/') || location.pathname === '/focus'
@@ -61,13 +111,25 @@ function Shell() {
 
       <main className="flex-1">
         <Routes>
-          <Route path="/" element={<Today user={user} />} />
-          <Route path="/calendar" element={<Calendar user={user} />} />
-          <Route path="/stats" element={<Stats user={user} />} />
+          <Route path="/" element={<Today user={user} syncTick={syncTick} />} />
+          <Route path="/calendar" element={<Calendar user={user} syncTick={syncTick} />} />
+          <Route path="/stats" element={<Stats user={user} syncTick={syncTick} />} />
           <Route path="/chat" element={<Chat user={user} />} />
-          <Route path="/settings" element={<Settings user={user} onLogout={logout} />} />
-          <Route path="/day/:date" element={<DayDetail user={user} />} />
-          <Route path="/focus" element={<Focus user={user} />} />
+          <Route
+            path="/settings"
+            element={
+              <Settings
+                user={user}
+                onLogout={logout}
+                syncTick={syncTick}
+                syncing={syncing}
+                lastSync={lastSync}
+                onSyncNow={() => runSync('manual')}
+              />
+            }
+          />
+          <Route path="/day/:date" element={<DayDetail user={user} syncTick={syncTick} />} />
+          <Route path="/focus" element={<Focus user={user} syncTick={syncTick} />} />
         </Routes>
       </main>
 

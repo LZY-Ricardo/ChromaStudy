@@ -1,4 +1,6 @@
 import axios from 'axios'
+import { enqueueOp, getPendingOps, removeOpsById, replaceQueuedTaskId } from '../utils/syncQueue.js'
+import { replaceTaskIdInOrder } from '../utils/taskOrder.js'
 
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
 
@@ -6,6 +8,17 @@ const api = axios.create({
   baseURL: apiBaseUrl,
   timeout: 15000,
 })
+
+function opId() {
+  if (typeof crypto !== 'undefined' && crypto?.randomUUID) {
+    return crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function isNetworkError(error) {
+  return !error?.response
+}
 
 function cacheKey(prefix, userId) {
   return `chroma_cache_${prefix}_${userId}`
@@ -30,6 +43,86 @@ function saveCache(key, value) {
   }
 }
 
+function mergeStudyLogsWithCache(userId, serverLogs) {
+  const pendingDates = new Set(
+    getPendingOps(userId)
+      .filter((op) => op?.type === 'checkin')
+      .map((op) => op?.payload?.date)
+      .filter(Boolean)
+  )
+
+  const key = cacheKey('studyLogs', userId)
+  const cached = loadCache(key)
+  const map = new Map(
+    (Array.isArray(serverLogs) ? serverLogs : []).map((log) => [log?.date, log])
+  )
+
+  if (Array.isArray(cached)) {
+    for (const log of cached) {
+      if (!log?.date) continue
+      if (log?._offline || pendingDates.has(log.date)) {
+        map.set(log.date, log)
+      }
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => String(a?.date).localeCompare(String(b?.date)))
+}
+
+function mergeTasksWithCache(userId, serverTasks) {
+  const pending = getPendingOps(userId)
+  const pendingUpdateIds = new Set(
+    pending
+      .filter((op) => op?.type === 'task_update')
+      .map((op) => op?.payload?.id)
+      .filter((id) => Number.isFinite(id))
+  )
+  const pendingDeleteIds = new Set(
+    pending
+      .filter((op) => op?.type === 'task_delete')
+      .map((op) => op?.payload?.id)
+      .filter((id) => Number.isFinite(id))
+  )
+
+  const key = cacheKey('tasks', userId)
+  const cached = loadCache(key)
+  const map = new Map((Array.isArray(serverTasks) ? serverTasks : []).map((task) => [task?.id, task]))
+
+  if (Array.isArray(cached)) {
+    for (const task of cached) {
+      if (!task || !Number.isFinite(task.id)) continue
+      if (task.id <= 0 || task?._offline || pendingUpdateIds.has(task.id)) {
+        map.set(task.id, task)
+      }
+    }
+  }
+
+  for (const id of pendingDeleteIds) {
+    map.delete(id)
+  }
+
+  return Array.from(map.values()).sort((a, b) => (a?.id || 0) - (b?.id || 0))
+}
+
+function appendTaskCache(userId, task) {
+  const key = cacheKey('tasks', userId)
+  const cached = loadCache(key)
+  const list = Array.isArray(cached) ? cached : []
+  saveCache(
+    key,
+    [...list.filter((item) => item?.id !== task?.id), task].filter(Boolean)
+  )
+}
+
+function replaceTaskInCache(userId, tempId, task) {
+  const key = cacheKey('tasks', userId)
+  const cached = loadCache(key)
+  const list = Array.isArray(cached) ? cached : []
+  const exists = list.some((item) => item?.id === tempId)
+  const next = exists ? list.map((item) => (item?.id === tempId ? task : item)) : [...list, task]
+  saveCache(key, next.filter(Boolean))
+}
+
 export async function login(username, password) {
   const { data } = await api.post('/api/login', { username, password })
   return data.user
@@ -44,8 +137,9 @@ export async function getStudyLogs(userId) {
   const key = cacheKey('studyLogs', userId)
   try {
     const { data } = await api.get('/api/study-logs', { params: { userId } })
-    saveCache(key, data)
-    return data
+    const merged = mergeStudyLogsWithCache(userId, data)
+    saveCache(key, merged)
+    return merged
   } catch (error) {
     const cached = loadCache(key)
     if (cached) return cached
@@ -54,8 +148,24 @@ export async function getStudyLogs(userId) {
 }
 
 export async function getStudyLogByDate(userId, date) {
-  const { data } = await api.get(`/api/study-logs/${date}`, { params: { userId } })
-  return data
+  const key = cacheKey('studyLogs', userId)
+  try {
+    const { data } = await api.get(`/api/study-logs/${date}`, { params: { userId } })
+    if (data) {
+      applyStudyLogCache(userId, data)
+    }
+    return data
+  } catch (error) {
+    if (!isNetworkError(error)) {
+      throw error
+    }
+
+    const cached = loadCache(key)
+    if (Array.isArray(cached)) {
+      return cached.find((item) => item?.date === date) ?? null
+    }
+    throw error
+  }
 }
 
 export async function generateAiFeedback(userId, date, ai) {
@@ -74,31 +184,105 @@ export async function generateAiFeedback(userId, date, ai) {
   return data
 }
 
-export async function checkin(payload) {
+async function postCheckinNetwork(payload) {
   const { data } = await api.post('/api/checkin', payload)
+  return data
+}
 
-  const userId = payload?.userId
-  if (userId) {
+function applyStudyLogCache(userId, log) {
+  const key = cacheKey('studyLogs', userId)
+  const cached = loadCache(key)
+  if (Array.isArray(cached)) {
+    const exists = cached.find((item) => item?.date === log?.date)
+    const next = exists
+      ? cached.map((item) => (item?.date === log?.date ? log : item))
+      : [...cached, log]
+    saveCache(key, next)
+  }
+}
+
+export async function checkin(payload) {
+  try {
+    const data = await postCheckinNetwork(payload)
+
+    const userId = payload?.userId
+    if (userId) {
+      applyStudyLogCache(userId, data)
+    }
+
+    return data
+  } catch (error) {
+    if (!isNetworkError(error)) {
+      throw error
+    }
+
+    const userId = payload?.userId
+    const date = payload?.date
+    if (!userId || !date) {
+      throw error
+    }
+
+    enqueueOp({
+      id: opId(),
+      type: 'checkin',
+      userId,
+      payload,
+      createdAt: Date.now(),
+    })
+
     const key = cacheKey('studyLogs', userId)
     const cached = loadCache(key)
-    if (Array.isArray(cached)) {
-      const exists = cached.find((item) => item?.date === data?.date)
-      const next = exists
-        ? cached.map((item) => (item?.date === data?.date ? data : item))
-        : [...cached, data]
-      saveCache(key, next)
-    }
-  }
+    const list = Array.isArray(cached) ? cached : []
+    const existing = list.find((item) => item?.date === date)
+    const mode = payload?.mode === 'increment' ? 'increment' : 'replace'
+    const minutes = Number.parseInt(String(payload?.duration), 10)
+    const content = String(payload?.content ?? '').trim()
+    const wantsFeedback =
+      typeof payload?.generateFeedback === 'boolean'
+        ? payload.generateFeedback
+        : mode === 'replace'
 
-  return data
+    const offline = existing
+      ? {
+          ...existing,
+          duration:
+            mode === 'increment'
+              ? (Number(existing.duration) || 0) + (Number(minutes) || 0)
+              : Number(minutes) || 0,
+          content:
+            mode === 'increment'
+              ? content
+                ? `${existing.content}\n${content}`.trim()
+                : existing.content
+              : content,
+          aiFeedback: wantsFeedback ? '' : existing.aiFeedback ?? '',
+        }
+      : {
+          id: Date.now(),
+          userId,
+          date,
+          duration: mode === 'increment' ? Number(minutes) || 0 : Number(minutes) || 0,
+          content: content || (mode === 'increment' ? `番茄钟专注 ${minutes} 分钟` : ''),
+          aiFeedback: wantsFeedback ? '' : '',
+          _offline: true,
+        }
+
+    const next = existing
+      ? list.map((item) => (item?.date === date ? offline : item))
+      : [...list, offline]
+    saveCache(key, next)
+
+    return offline
+  }
 }
 
 export async function getTasks(userId) {
   const key = cacheKey('tasks', userId)
   try {
     const { data } = await api.get('/api/tasks', { params: { userId } })
-    saveCache(key, data)
-    return data
+    const merged = mergeTasksWithCache(userId, data)
+    saveCache(key, merged)
+    return merged
   } catch (error) {
     const cached = loadCache(key)
     if (cached) return cached
@@ -107,36 +291,113 @@ export async function getTasks(userId) {
 }
 
 export async function createTask(userId, title) {
-  const { data } = await api.post('/api/tasks', { userId, title })
+  try {
+    const { data } = await api.post('/api/tasks', { userId, title })
+    appendTaskCache(userId, data)
+    return data
+  } catch (error) {
+    if (!isNetworkError(error)) {
+      throw error
+    }
 
+    const tempId = -Math.floor(Date.now() + Math.random() * 1000)
+    const offline = { id: tempId, userId, title, isDone: false, _offline: true }
+
+    enqueueOp({
+      id: opId(),
+      type: 'task_create',
+      userId,
+      payload: { tempId, title },
+      createdAt: Date.now(),
+    })
+
+    appendTaskCache(userId, offline)
+    return offline
+  }
+}
+
+async function patchTaskNetwork(id, updates) {
+  const { data } = await api.patch(`/api/tasks/${id}`, updates)
+  return data
+}
+
+function applyTaskCache(userId, task) {
   const key = cacheKey('tasks', userId)
   const cached = loadCache(key)
   if (Array.isArray(cached)) {
-    saveCache(key, [...cached, data])
+    saveCache(
+      key,
+      cached.map((item) => (item?.id === task?.id ? task : item))
+    )
   }
-
-  return data
 }
 
-export async function updateTask(id, updates) {
-  const { data } = await api.patch(`/api/tasks/${id}`, updates)
-  const userId = data?.userId
-  if (userId) {
+export async function updateTask(userId, id, updates) {
+  const normalizedId = Number(id)
+  if (!Number.isFinite(normalizedId)) {
+    throw new Error('invalid task id')
+  }
+
+  if (normalizedId <= 0) {
+    enqueueOp({
+      id: opId(),
+      type: 'task_update',
+      userId,
+      payload: { id: normalizedId, updates },
+      createdAt: Date.now(),
+    })
+
     const key = cacheKey('tasks', userId)
     const cached = loadCache(key)
-    if (Array.isArray(cached)) {
-      saveCache(
-        key,
-        cached.map((item) => (item?.id === data?.id ? data : item))
-      )
-    }
+    const list = Array.isArray(cached) ? cached : []
+    const existing = list.find((item) => item?.id === normalizedId)
+    const offline = existing
+      ? { ...existing, ...updates }
+      : { id: normalizedId, userId, ...updates, _offline: true }
+    const next = existing
+      ? list.map((item) => (item?.id === normalizedId ? offline : item))
+      : [...list, offline]
+    saveCache(key, next)
+    return offline
   }
-  return data
+
+  try {
+    const data = await patchTaskNetwork(normalizedId, updates)
+    applyTaskCache(userId, data)
+    return data
+  } catch (error) {
+    if (!isNetworkError(error)) {
+      throw error
+    }
+
+    enqueueOp({
+      id: opId(),
+      type: 'task_update',
+      userId,
+      payload: { id: normalizedId, updates },
+      createdAt: Date.now(),
+    })
+
+    const key = cacheKey('tasks', userId)
+    const cached = loadCache(key)
+    const list = Array.isArray(cached) ? cached : []
+    const existing = list.find((item) => item?.id === normalizedId)
+    const offline = existing
+      ? { ...existing, ...updates }
+      : { id: normalizedId, userId, ...updates, _offline: true }
+    const next = existing
+      ? list.map((item) => (item?.id === normalizedId ? offline : item))
+      : list
+    saveCache(key, next)
+    return offline
+  }
 }
 
-export async function deleteTask(userId, id) {
+async function deleteTaskNetwork(userId, id) {
   await api.delete(`/api/tasks/${id}`, { params: { userId } })
+}
 
+function removeTaskCache(userId, id) {
   const key = cacheKey('tasks', userId)
   const cached = loadCache(key)
   if (Array.isArray(cached)) {
@@ -145,8 +406,135 @@ export async function deleteTask(userId, id) {
       cached.filter((item) => item?.id !== id)
     )
   }
+}
 
-  return { ok: true }
+export async function deleteTask(userId, id) {
+  const normalizedId = Number(id)
+  if (!Number.isFinite(normalizedId)) {
+    throw new Error('invalid task id')
+  }
+
+  if (normalizedId <= 0) {
+    const pending = getPendingOps(userId)
+    const related = pending
+      .filter((op) => {
+        if (!op?.id) return false
+        if (op?.type === 'task_create' && op?.payload?.tempId === normalizedId) return true
+        if (op?.type === 'task_update' && op?.payload?.id === normalizedId) return true
+        if (op?.type === 'task_delete' && op?.payload?.id === normalizedId) return true
+        return false
+      })
+      .map((op) => op.id)
+
+    if (related.length) {
+      removeOpsById(related)
+    }
+
+    removeTaskCache(userId, normalizedId)
+    return { ok: true, queued: true, localOnly: true }
+  }
+
+  try {
+    await deleteTaskNetwork(userId, normalizedId)
+    removeTaskCache(userId, normalizedId)
+    return { ok: true }
+  } catch (error) {
+    if (!isNetworkError(error)) {
+      throw error
+    }
+
+    enqueueOp({
+      id: opId(),
+      type: 'task_delete',
+      userId,
+      payload: { id: normalizedId },
+      createdAt: Date.now(),
+    })
+
+    removeTaskCache(userId, normalizedId)
+    return { ok: true, queued: true }
+  }
+}
+
+export async function syncPendingOps(userId) {
+  const ops = getPendingOps(userId).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+  if (ops.length === 0) {
+    return { ok: true, processed: 0, succeeded: 0, failed: 0 }
+  }
+
+  const completedIds = []
+  let succeeded = 0
+  let failed = 0
+  const tempTaskIdMap = new Map()
+
+  for (const op of ops) {
+    try {
+      if (op.type === 'checkin') {
+        const data = await postCheckinNetwork(op.payload)
+        applyStudyLogCache(userId, data)
+        completedIds.push(op.id)
+        succeeded += 1
+        continue
+      }
+
+      if (op.type === 'task_create') {
+        const { tempId, title } = op.payload || {}
+        if (!Number.isFinite(tempId) || !title) {
+          completedIds.push(op.id)
+          failed += 1
+          continue
+        }
+
+        const { data } = await api.post('/api/tasks', { userId, title })
+        replaceTaskInCache(userId, tempId, data)
+        replaceTaskIdInOrder(userId, tempId, data.id)
+        replaceQueuedTaskId(userId, tempId, data.id)
+        tempTaskIdMap.set(tempId, data.id)
+
+        completedIds.push(op.id)
+        succeeded += 1
+        continue
+      }
+
+      if (op.type === 'task_update') {
+        const { id, updates } = op.payload || {}
+        const actualId = tempTaskIdMap.get(id) ?? id
+        const data = await patchTaskNetwork(actualId, updates)
+        applyTaskCache(userId, data)
+        completedIds.push(op.id)
+        succeeded += 1
+        continue
+      }
+
+      if (op.type === 'task_delete') {
+        const { id } = op.payload || {}
+        const actualId = tempTaskIdMap.get(id) ?? id
+        if (!Number.isFinite(actualId) || actualId <= 0) {
+          completedIds.push(op.id)
+          succeeded += 1
+          continue
+        }
+        await deleteTaskNetwork(userId, actualId)
+        removeTaskCache(userId, actualId)
+        completedIds.push(op.id)
+        succeeded += 1
+        continue
+      }
+
+      completedIds.push(op.id)
+      failed += 1
+    } catch (error) {
+      if (isNetworkError(error)) {
+        break
+      }
+      completedIds.push(op.id)
+      failed += 1
+    }
+  }
+
+  removeOpsById(completedIds)
+
+  return { ok: true, processed: ops.length, succeeded, failed }
 }
 
 export async function decomposeTasks(goal, constraints, ai) {

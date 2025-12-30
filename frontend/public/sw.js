@@ -1,5 +1,3 @@
-/* eslint-disable no-restricted-globals */
-
 const CACHE_NAME = 'chromastudy-shell-v2'
 const CORE_ASSETS = [
   '/',

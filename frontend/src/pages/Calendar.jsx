@@ -12,7 +12,7 @@ function getHeatColor(duration) {
   return '#22c55e'
 }
 
-function Calendar({ user }) {
+function Calendar({ user, syncTick }) {
   const navigate = useNavigate()
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(false)
@@ -34,7 +34,7 @@ function Calendar({ user }) {
       }
     }
     load()
-  }, [user])
+  }, [syncTick, user?.id])
 
   const logMap = useMemo(() => {
     return new Map(logs.map((log) => [log.date, log]))

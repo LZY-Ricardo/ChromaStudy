@@ -11,7 +11,7 @@ import {
 import { loadAiConfig } from '../utils/storage.js'
 import { loadReview, saveReview } from '../utils/review.js'
 
-function DayDetail({ user }) {
+function DayDetail({ user, syncTick }) {
   const navigate = useNavigate()
   const { date = '' } = useParams()
   const normalizedDate = String(date).trim()
@@ -68,7 +68,7 @@ function DayDetail({ user }) {
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, normalizedDate])
+  }, [syncTick, user?.id, normalizedDate])
 
   useEffect(() => {
     if (!user?.id || !validDate) return

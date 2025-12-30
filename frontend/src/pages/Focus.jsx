@@ -16,7 +16,7 @@ function formatTime(seconds) {
   return `${minutes}:${remain}`
 }
 
-function Focus({ user }) {
+function Focus({ user, syncTick }) {
   const navigate = useNavigate()
   const todayKey = useMemo(() => dayjs().format('YYYY-MM-DD'), [])
 
@@ -50,7 +50,7 @@ function Focus({ user }) {
   useEffect(() => {
     loadToday()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id])
+  }, [syncTick, user?.id])
 
   const stopTicker = () => {
     if (tickRef.current) {
@@ -325,4 +325,3 @@ function Focus({ user }) {
 }
 
 export default Focus
-

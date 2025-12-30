@@ -6,7 +6,7 @@ import { generateReport, getStudyLogs } from '../services/api.js'
 import { loadWeeklyGoal } from '../utils/habit.js'
 import { loadAiConfig } from '../utils/storage.js'
 
-function Stats({ user }) {
+function Stats({ user, syncTick }) {
   const navigate = useNavigate()
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(false)
@@ -27,7 +27,7 @@ function Stats({ user }) {
       }
     }
     load()
-  }, [user])
+  }, [syncTick, user?.id])
 
   const weekRange = useMemo(() => {
     const now = dayjs()
