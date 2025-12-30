@@ -459,12 +459,23 @@ export async function deleteTask(userId, id) {
 export async function syncPendingOps(userId) {
   const ops = getPendingOps(userId).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
   if (ops.length === 0) {
-    return { ok: true, processed: 0, succeeded: 0, failed: 0 }
+    return {
+      ok: true,
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      blocked: null,
+      blockedOp: null,
+      blockedError: '',
+    }
   }
 
   const completedIds = []
   let succeeded = 0
   let failed = 0
+  let blocked = null
+  let blockedOp = null
+  let blockedError = ''
   const tempTaskIdMap = new Map()
 
   for (const op of ops) {
@@ -525,16 +536,36 @@ export async function syncPendingOps(userId) {
       failed += 1
     } catch (error) {
       if (isNetworkError(error)) {
+        blocked = 'network'
+        blockedOp = op
+        blockedError = String(error?.message ?? 'network error')
         break
       }
-      completedIds.push(op.id)
       failed += 1
+      blocked = 'conflict'
+      blockedOp = op
+      if (error?.response) {
+        const status = error.response.status
+        const data = error.response.data
+        const detail =
+          typeof data === 'string'
+            ? data
+            : typeof data?.error === 'string'
+              ? data.error
+              : data
+                ? JSON.stringify(data)
+                : ''
+        blockedError = `${status}${detail ? ` ${detail}` : ''}`.trim()
+      } else {
+        blockedError = String(error?.message ?? 'request failed')
+      }
+      break
     }
   }
 
   removeOpsById(completedIds)
 
-  return { ok: true, processed: ops.length, succeeded, failed }
+  return { ok: true, processed: succeeded + failed, succeeded, failed, blocked, blockedOp, blockedError }
 }
 
 export async function decomposeTasks(goal, constraints, ai) {

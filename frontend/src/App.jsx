@@ -43,7 +43,15 @@ function Shell() {
 
       const pending = getPendingOpsCount(user.id)
       if (pending === 0 && reason !== 'startup') {
-        return { ok: true, processed: 0, succeeded: 0, failed: 0 }
+        return {
+          ok: true,
+          processed: 0,
+          succeeded: 0,
+          failed: 0,
+          blocked: null,
+          blockedOp: null,
+          blockedError: '',
+        }
       }
 
       setSyncing(true)
@@ -51,11 +59,22 @@ function Shell() {
         const result = await syncPendingOps(user.id)
         setLastSync({ at: Date.now(), ...result })
 
-        if (result.processed > 0) {
+        if (result.succeeded > 0) {
           setSyncTick(Date.now())
+        }
+
+        if (result.processed > 0) {
+          const suffix =
+            result.blocked === 'conflict'
+              ? '（已暂停：冲突）'
+              : result.blocked === 'network'
+                ? '（已暂停：网络）'
+                : ''
           Toast.show({
-            content: `已同步 ${result.succeeded}/${result.processed}，失败 ${result.failed}`,
+            content: `已同步 ${result.succeeded}/${result.processed}，失败 ${result.failed}${suffix}`,
           })
+        } else if (pending > 0 && result.blocked === 'network' && reason === 'manual') {
+          Toast.show({ content: '当前网络不可用，待同步更改已保留' })
         }
 
         return result
