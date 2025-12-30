@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import { Button, Card, Dialog, Input, List, Switch, Tag, TextArea, Toast } from 'antd-mobile'
 import { checkin, createTask, getStudyLogs, getTasks, updateTask } from '../services/api.js'
+import { loadAiConfig } from '../utils/storage.js'
 
 function Today({ user }) {
   const todayLabel = dayjs().format('dddd, MMM D')
@@ -63,6 +64,7 @@ function Today({ user }) {
         date: todayKey,
         duration: minutes,
         content: content.trim(),
+        ai: loadAiConfig(),
       })
       setLogs((prev) => {
         const exists = prev.find((item) => item.date === log.date)

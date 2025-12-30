@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Card, DotLoading, TabBar } from 'antd-mobile'
-import { CalendarDays, Home, MessageCircle } from 'lucide-react'
+import { CalendarDays, Home, MessageCircle, Settings as SettingsIcon } from 'lucide-react'
 import Today from './pages/Today.jsx'
 import Calendar from './pages/Calendar.jsx'
 import Chat from './pages/Chat.jsx'
+import Settings from './pages/Settings.jsx'
 import { login } from './services/api.js'
 import { loadUser, saveUser } from './utils/storage.js'
 
@@ -12,6 +13,7 @@ const tabs = [
   { key: '/', title: 'Today', icon: <Home size={18} /> },
   { key: '/calendar', title: 'Calendar', icon: <CalendarDays size={18} /> },
   { key: '/chat', title: 'Coach', icon: <MessageCircle size={18} /> },
+  { key: '/settings', title: 'Settings', icon: <SettingsIcon size={18} /> },
 ]
 
 function Shell() {
@@ -99,6 +101,7 @@ function Shell() {
           <Route path="/" element={<Today user={user} />} />
           <Route path="/calendar" element={<Calendar user={user} />} />
           <Route path="/chat" element={<Chat user={user} />} />
+          <Route path="/settings" element={<Settings user={user} />} />
         </Routes>
       </main>
 

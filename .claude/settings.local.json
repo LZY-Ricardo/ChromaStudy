@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(npm start)",
+      "Bash(timeout:*)",
+      "Bash(node test-ollama:*)",
+      "Bash(ping:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(node:*)",
+      "Bash(taskkill:*)",
+      "Bash(tasklist:*)",
+      "Bash(cmd:*)",
+      "Bash(cat:*)",
+      "Bash(dir:*)",
+      "Bash(powershell:*)",
+      "Bash(start ollama serve)",
+      "Bash(git add:*)"
+    ]
+  }
+}

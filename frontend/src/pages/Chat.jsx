@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Button, Card, Input, Toast } from 'antd-mobile'
 import { apiBaseUrl } from '../services/api.js'
+import { loadAiConfig } from '../utils/storage.js'
 
 function Chat() {
   const [draft, setDraft] = useState('')
@@ -50,25 +51,36 @@ function Chat() {
     setStreaming(true)
 
     try {
+      console.log('Sending request to:', `${apiBaseUrl}/api/chat`)
+      console.log('Payload:', { messages: payloadMessages })
+
       const response = await fetch(`${apiBaseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: payloadMessages }),
+        body: JSON.stringify({ messages: payloadMessages, ai: loadAiConfig() }),
       })
 
+      console.log('Response status:', response.status)
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()))
+
       if (!response.ok || !response.body) {
+        console.error('Response not OK or no body')
         throw new Error('stream_failed')
       }
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let chunkCount = 0
 
       while (true) {
         const { value, done } = await reader.read()
         if (done) {
+          console.log('Stream ended, total chunks:', chunkCount)
           break
         }
+        chunkCount++
+        console.log('Received chunk:', chunkCount, 'size:', value.length)
         buffer += decoder.decode(value, { stream: true })
         const parts = buffer.split('\n\n')
         buffer = parts.pop() || ''
@@ -87,14 +99,16 @@ function Chat() {
           try {
             const data = JSON.parse(payload)
             if (data.content && activeAssistantRef.current) {
+              console.log('Appending content:', data.content)
               appendAssistant(activeAssistantRef.current, data.content)
             }
-          } catch {
-            // ignore malformed chunks
+          } catch (e) {
+            console.error('Failed to parse chunk:', payload, e)
           }
         })
       }
-    } catch {
+    } catch (e) {
+      console.error('Chat error:', e)
       Toast.show({ content: 'AI 连接失败，请稍后重试' })
     } finally {
       setStreaming(false)
