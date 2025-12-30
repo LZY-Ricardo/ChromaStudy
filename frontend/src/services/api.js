@@ -35,6 +35,11 @@ export async function login(username, password) {
   return data.user
 }
 
+export async function getUsers() {
+  const { data } = await api.get('/api/users')
+  return data
+}
+
 export async function getStudyLogs(userId) {
   const key = cacheKey('studyLogs', userId)
   try {
@@ -46,6 +51,27 @@ export async function getStudyLogs(userId) {
     if (cached) return cached
     throw error
   }
+}
+
+export async function getStudyLogByDate(userId, date) {
+  const { data } = await api.get(`/api/study-logs/${date}`, { params: { userId } })
+  return data
+}
+
+export async function generateAiFeedback(userId, date, ai) {
+  const { data } = await api.post(`/api/study-logs/${date}/ai-feedback`, { userId, ai })
+
+  const key = cacheKey('studyLogs', userId)
+  const cached = loadCache(key)
+  if (Array.isArray(cached)) {
+    const exists = cached.find((item) => item?.date === data?.date)
+    const next = exists
+      ? cached.map((item) => (item?.date === data?.date ? data : item))
+      : [...cached, data]
+    saveCache(key, next)
+  }
+
+  return data
 }
 
 export async function checkin(payload) {
@@ -105,5 +131,35 @@ export async function updateTask(id, updates) {
       )
     }
   }
+  return data
+}
+
+export async function deleteTask(userId, id) {
+  await api.delete(`/api/tasks/${id}`, { params: { userId } })
+
+  const key = cacheKey('tasks', userId)
+  const cached = loadCache(key)
+  if (Array.isArray(cached)) {
+    saveCache(
+      key,
+      cached.filter((item) => item?.id !== id)
+    )
+  }
+
+  return { ok: true }
+}
+
+export async function decomposeTasks(goal, constraints, ai) {
+  const { data } = await api.post('/api/ai/tasks/decompose', { goal, constraints, ai })
+  return data?.tasks ?? []
+}
+
+export async function generateReviewQuestions(userId, date, ai) {
+  const { data } = await api.post('/api/ai/review', { userId, date, ai })
+  return data?.questions ?? []
+}
+
+export async function generateReport(userId, payload) {
+  const { data } = await api.post('/api/ai/report', { userId, ...payload })
   return data
 }

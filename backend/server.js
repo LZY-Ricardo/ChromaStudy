@@ -139,6 +139,57 @@ async function generateFeedback(content, aiConfig) {
   return normalizeFeedback(text);
 }
 
+function stripCodeFences(text) {
+  return String(text || "")
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+}
+
+function tryParseJson(text) {
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch {
+    return { ok: false, value: null };
+  }
+}
+
+function parseJsonFromText(text) {
+  const cleaned = stripCodeFences(text);
+  const direct = tryParseJson(cleaned);
+  if (direct.ok) {
+    return direct.value;
+  }
+
+  const arrayStart = cleaned.indexOf("[");
+  const arrayEnd = cleaned.lastIndexOf("]");
+  if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd > arrayStart) {
+    const candidate = cleaned.slice(arrayStart, arrayEnd + 1);
+    const parsed = tryParseJson(candidate);
+    if (parsed.ok) {
+      return parsed.value;
+    }
+  }
+
+  const objStart = cleaned.indexOf("{");
+  const objEnd = cleaned.lastIndexOf("}");
+  if (objStart !== -1 && objEnd !== -1 && objEnd > objStart) {
+    const candidate = cleaned.slice(objStart, objEnd + 1);
+    const parsed = tryParseJson(candidate);
+    if (parsed.ok) {
+      return parsed.value;
+    }
+  }
+
+  return null;
+}
+
+function toTaskTitle(text) {
+  const title = String(text || "").replace(/\s+/g, " ").trim();
+  if (!title) return "";
+  return title.slice(0, 80);
+}
+
 function asyncHandler(handler) {
   return (req, res) => {
     Promise.resolve(handler(req, res)).catch((error) => {
@@ -151,6 +202,18 @@ function asyncHandler(handler) {
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
 });
+
+app.get(
+  "/api/users",
+  asyncHandler(async (req, res) => {
+    const users = await prisma.user.findMany({
+      select: { id: true, username: true },
+      orderBy: { id: "asc" },
+    });
+
+    return res.json(users);
+  })
+);
 
 app.post(
   "/api/login",
@@ -184,22 +247,193 @@ app.post(
 app.post(
   "/api/checkin",
   asyncHandler(async (req, res) => {
-    const { userId, date, duration, content, ai } = req.body || {};
+    const {
+      userId,
+      date,
+      duration,
+      content,
+      ai,
+      mode,
+      generateFeedback: generateFeedbackOption,
+    } = req.body || {};
     const normalizedUserId = Number(userId);
-    const normalizedDuration = Number(duration);
+    const normalizedDuration = Number.parseInt(String(duration), 10);
     const logDate = date || toDateString();
     const aiConfig = resolveAiConfig(ai);
+    const operationMode = mode === "increment" ? "increment" : "replace";
+    const shouldGenerateFeedback =
+      typeof generateFeedbackOption === "boolean"
+        ? generateFeedbackOption
+        : operationMode === "replace";
 
     if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
       return res.status(400).json({ error: "userId must be a positive integer" });
     }
 
-    if (!Number.isFinite(normalizedDuration) || normalizedDuration < 0) {
-      return res.status(400).json({ error: "duration must be a non-negative number" });
+    if (!Number.isInteger(normalizedDuration)) {
+      return res.status(400).json({ error: "duration must be an integer" });
     }
 
-    if (!content) {
+    if (operationMode === "replace" && normalizedDuration < 0) {
+      return res.status(400).json({ error: "duration must be a non-negative integer" });
+    }
+
+    if (operationMode === "increment" && normalizedDuration <= 0) {
+      return res.status(400).json({ error: "duration must be a positive integer" });
+    }
+
+    const trimmedContent = typeof content === "string" ? content.trim() : "";
+    if (operationMode === "replace" && !trimmedContent) {
       return res.status(400).json({ error: "content is required" });
+    }
+
+    if (aiConfig.provider === "openai" && shouldGenerateFeedback) {
+      const error = validateOpenAiConfig(aiConfig);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+    }
+
+    let log;
+    if (operationMode === "increment") {
+      const existing = await prisma.studyLog.findUnique({
+        where: {
+          userId_date: {
+            userId: normalizedUserId,
+            date: logDate,
+          },
+        },
+      });
+
+      if (existing) {
+        const nextContent = trimmedContent
+          ? `${existing.content}\n${trimmedContent}`
+          : existing.content;
+
+        log = await prisma.studyLog.update({
+          where: {
+            userId_date: {
+              userId: normalizedUserId,
+              date: logDate,
+            },
+          },
+          data: {
+            duration: existing.duration + normalizedDuration,
+            content: nextContent,
+            ...(shouldGenerateFeedback ? { aiFeedback: null } : {}),
+          },
+        });
+      } else {
+        log = await prisma.studyLog.create({
+          data: {
+            userId: normalizedUserId,
+            date: logDate,
+            duration: normalizedDuration,
+            content:
+              trimmedContent || `番茄钟专注 ${normalizedDuration} 分钟`,
+            aiFeedback: shouldGenerateFeedback ? null : "",
+          },
+        });
+      }
+    } else {
+      log = await prisma.studyLog.upsert({
+        where: {
+          userId_date: {
+            userId: normalizedUserId,
+            date: logDate,
+          },
+        },
+        create: {
+          userId: normalizedUserId,
+          date: logDate,
+          duration: normalizedDuration,
+          content: trimmedContent,
+          aiFeedback: null,
+        },
+        update: {
+          duration: normalizedDuration,
+          content: trimmedContent,
+          aiFeedback: null,
+        },
+      });
+    }
+
+    res.json(log);
+
+    if (!shouldGenerateFeedback) {
+      return;
+    }
+
+    setImmediate(async () => {
+      try {
+        const feedback = await generateFeedback(log.content, aiConfig);
+        await prisma.studyLog.update({
+          where: {
+            userId_date: {
+              userId: normalizedUserId,
+              date: logDate,
+            },
+          },
+          data: { aiFeedback: feedback || "" },
+        });
+      } catch (error) {
+        console.error("AI feedback error:", error);
+        await prisma.studyLog
+          .update({
+            where: {
+              userId_date: {
+                userId: normalizedUserId,
+                date: logDate,
+              },
+            },
+            data: { aiFeedback: "" },
+          })
+          .catch(() => {});
+      }
+    });
+  })
+);
+
+app.get(
+  "/api/study-logs/:date",
+  asyncHandler(async (req, res) => {
+    const userId = Number(req.query.userId);
+    const date = String(req.params.date || "").trim();
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+    }
+
+    const log = await prisma.studyLog.findUnique({
+      where: {
+        userId_date: {
+          userId,
+          date,
+        },
+      },
+    });
+
+    return res.json(log);
+  })
+);
+
+app.post(
+  "/api/study-logs/:date/ai-feedback",
+  asyncHandler(async (req, res) => {
+    const userId = Number(req.body?.userId);
+    const date = String(req.params.date || "").trim();
+    const aiConfig = resolveAiConfig(req.body?.ai);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "date must be YYYY-MM-DD" });
     }
 
     if (aiConfig.provider === "openai") {
@@ -209,49 +443,37 @@ app.post(
       }
     }
 
-    const log = await prisma.studyLog.upsert({
+    const log = await prisma.studyLog.findUnique({
       where: {
         userId_date: {
-          userId: normalizedUserId,
-          date: logDate,
+          userId,
+          date,
         },
       },
-      create: {
-        userId: normalizedUserId,
-        date: logDate,
-        duration: normalizedDuration,
-        content,
-        aiFeedback: null,
-      },
-      update: {
-        duration: normalizedDuration,
-        content,
-        aiFeedback: null,
-      },
     });
 
-    res.json(log);
+    if (!log) {
+      return res.status(404).json({ error: "study log not found" });
+    }
 
-    setImmediate(async () => {
-      try {
-        const feedback = await generateFeedback(content, aiConfig);
-        if (!feedback) {
-          return;
-        }
+    let feedback = "";
+    try {
+      feedback = await generateFeedback(log.content, aiConfig);
+    } catch (error) {
+      console.error("AI feedback error:", error);
+    }
 
-        await prisma.studyLog.update({
-          where: {
-            userId_date: {
-              userId: normalizedUserId,
-              date: logDate,
-            },
-          },
-          data: { aiFeedback: feedback },
-        });
-      } catch (error) {
-        console.error("AI feedback error:", error);
-      }
+    const updated = await prisma.studyLog.update({
+      where: {
+        userId_date: {
+          userId,
+          date,
+        },
+      },
+      data: { aiFeedback: feedback || "" },
     });
+
+    return res.json(updated);
   })
 );
 
@@ -259,12 +481,34 @@ app.get(
   "/api/study-logs",
   asyncHandler(async (req, res) => {
     const userId = Number(req.query.userId);
+    const from = typeof req.query.from === "string" ? req.query.from.trim() : "";
+    const to = typeof req.query.to === "string" ? req.query.to.trim() : "";
+
     if (!Number.isInteger(userId) || userId <= 0) {
       return res.status(400).json({ error: "userId must be a positive integer" });
     }
 
+    if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+      return res.status(400).json({ error: "from must be YYYY-MM-DD" });
+    }
+
+    if (to && !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return res.status(400).json({ error: "to must be YYYY-MM-DD" });
+    }
+
+    const dateFilter = {};
+    if (from) {
+      dateFilter.gte = from;
+    }
+    if (to) {
+      dateFilter.lte = to;
+    }
+
     const logs = await prisma.studyLog.findMany({
-      where: { userId },
+      where: {
+        userId,
+        ...(from || to ? { date: dateFilter } : {}),
+      },
       orderBy: { date: "asc" },
     });
 
@@ -342,6 +586,249 @@ app.patch(
     });
 
     return res.json(updated);
+  })
+);
+
+app.delete(
+  "/api/tasks/:id",
+  asyncHandler(async (req, res) => {
+    const taskId = Number(req.params.id);
+    const userId = Number(req.query.userId);
+
+    if (!Number.isInteger(taskId) || taskId <= 0) {
+      return res.status(400).json({ error: "id must be a positive integer" });
+    }
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+
+    const task = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!task || task.userId !== userId) {
+      return res.status(404).json({ error: "task not found" });
+    }
+
+    await prisma.task.delete({ where: { id: taskId } });
+    return res.json({ ok: true });
+  })
+);
+
+app.post(
+  "/api/ai/tasks/decompose",
+  asyncHandler(async (req, res) => {
+    const { goal, ai, constraints } = req.body || {};
+    const userGoal = typeof goal === "string" ? goal.trim() : "";
+    if (!userGoal) {
+      return res.status(400).json({ error: "goal is required" });
+    }
+
+    const aiConfig = resolveAiConfig(ai);
+    if (aiConfig.provider === "openai") {
+      const error = validateOpenAiConfig(aiConfig);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+    }
+
+    const extraConstraints = typeof constraints === "string" ? constraints.trim() : "";
+    const prompt = [
+      `目标：${userGoal}`,
+      extraConstraints ? `约束：${extraConstraints}` : "",
+      "",
+      "请把目标拆解为 5~10 个可执行任务，任务应具体、可在 30~60 分钟内完成。",
+      "只输出 JSON（不要 Markdown/解释），格式为数组：",
+      '[{"title":"...", "estimateMinutes":30}]',
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const text = await chatOnce(aiConfig, [
+      {
+        role: "system",
+        content: "你是学习规划助手。你只输出严格 JSON，不输出其它文本。",
+      },
+      { role: "user", content: prompt },
+    ]);
+
+    const parsed = parseJsonFromText(text);
+    const rawTasks = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.tasks)
+        ? parsed.tasks
+        : null;
+
+    if (!rawTasks) {
+      return res.status(502).json({ error: "failed to parse tasks" });
+    }
+
+    const tasks = rawTasks
+      .map((item, index) => {
+        const title = toTaskTitle(item?.title ?? item);
+        if (!title) return null;
+        const estimateMinutes = Number.parseInt(String(item?.estimateMinutes ?? ""), 10);
+        return {
+          title,
+          estimateMinutes: Number.isFinite(estimateMinutes) && estimateMinutes > 0 ? estimateMinutes : null,
+          order: index + 1,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 20);
+
+    if (tasks.length === 0) {
+      return res.status(502).json({ error: "no tasks generated" });
+    }
+
+    return res.json({ tasks });
+  })
+);
+
+app.post(
+  "/api/ai/review",
+  asyncHandler(async (req, res) => {
+    const { userId, date, ai } = req.body || {};
+    const normalizedUserId = Number(userId);
+    const normalizedDate = typeof date === "string" ? date.trim() : "";
+
+    if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+      return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+      return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+    }
+
+    const log = await prisma.studyLog.findUnique({
+      where: {
+        userId_date: {
+          userId: normalizedUserId,
+          date: normalizedDate,
+        },
+      },
+    });
+
+    if (!log || !log.duration || log.duration <= 0) {
+      return res.status(400).json({ error: "study log is required" });
+    }
+
+    const aiConfig = resolveAiConfig(ai);
+    if (aiConfig.provider === "openai") {
+      const error = validateOpenAiConfig(aiConfig);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+    }
+
+    const prompt = [
+      `日期：${log.date}`,
+      `学习时长：${log.duration} 分钟`,
+      "学习内容：",
+      log.content,
+      "",
+      "请生成 3 个复盘问题（每题 <= 30 字），用于帮助我回顾与巩固。",
+      "只输出 JSON：{\"questions\":[\"...\",\"...\",\"...\"]}",
+    ].join("\n");
+
+    const text = await chatOnce(aiConfig, [
+      {
+        role: "system",
+        content: "你是学习教练。你只输出严格 JSON，不输出其它文本。",
+      },
+      { role: "user", content: prompt },
+    ]);
+
+    const parsed = parseJsonFromText(text);
+    const questions = Array.isArray(parsed?.questions) ? parsed.questions : null;
+    if (!questions) {
+      return res.status(502).json({ error: "failed to parse questions" });
+    }
+
+    const normalized = questions
+      .map((q) => String(q || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .slice(0, 5);
+
+    if (normalized.length === 0) {
+      return res.status(502).json({ error: "no questions generated" });
+    }
+
+    return res.json({ date: normalizedDate, questions: normalized });
+  })
+);
+
+app.post(
+  "/api/ai/report",
+  asyncHandler(async (req, res) => {
+    const { userId, type, periodStart, periodEnd, ai } = req.body || {};
+    const normalizedUserId = Number(userId);
+    const reportType = type === "monthly" ? "monthly" : "weekly";
+    const start = typeof periodStart === "string" ? periodStart.trim() : "";
+    const end = typeof periodEnd === "string" ? periodEnd.trim() : "";
+
+    if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+      return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      return res.status(400).json({ error: "periodStart/periodEnd must be YYYY-MM-DD" });
+    }
+
+    const aiConfig = resolveAiConfig(ai);
+    if (aiConfig.provider === "openai") {
+      const error = validateOpenAiConfig(aiConfig);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+    }
+
+    const logs = await prisma.studyLog.findMany({
+      where: {
+        userId: normalizedUserId,
+        date: { gte: start, lte: end },
+      },
+      orderBy: { date: "asc" },
+    });
+
+    const totalMinutes = logs.reduce((sum, log) => sum + (Number(log.duration) || 0), 0);
+    const activeDays = logs.filter((log) => (Number(log.duration) || 0) > 0).length;
+    const bestDay = logs.reduce(
+      (best, log) => {
+        const minutes = Number(log.duration) || 0;
+        if (minutes > best.minutes) {
+          return { date: log.date, minutes };
+        }
+        return best;
+      },
+      { date: "", minutes: 0 }
+    );
+
+    const prompt = [
+      `报告类型：${reportType === "weekly" ? "周报" : "月报"}`,
+      `周期：${start} ~ ${end}`,
+      `总学习时长：${totalMinutes} 分钟`,
+      `活跃天数：${activeDays}`,
+      `最佳日：${bestDay.date || "—"}（${bestDay.minutes} 分钟）`,
+      "",
+      "请输出一段中文总结（<= 300 字），包含：亮点、可改进点、下周期建议（给出 2~3 条具体建议）。",
+    ].join("\n");
+
+    const text = await chatOnce(aiConfig, [
+      { role: "system", content: "你是学习教练，语气鼓励但务实。只输出正文，不要标题编号以外的杂项。" },
+      { role: "user", content: prompt },
+    ]);
+
+    const report = String(text || "").trim();
+    if (!report) {
+      return res.status(502).json({ error: "empty report" });
+    }
+
+    return res.json({
+      type: reportType,
+      periodStart: start,
+      periodEnd: end,
+      stats: { totalMinutes, activeDays, bestDay },
+      report,
+    });
   })
 );
 

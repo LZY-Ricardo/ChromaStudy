@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Button, Card, Input, List, Selector, Toast } from 'antd-mobile'
 import { loadAiConfig, saveAiConfig } from '../utils/storage.js'
+import { loadWeeklyGoal, saveWeeklyGoal } from '../utils/habit.js'
 
 const defaultAiConfig = {
   provider: 'ollama',
@@ -15,7 +16,7 @@ const defaultAiConfig = {
   },
 }
 
-function Settings({ user }) {
+function Settings({ user, onLogout }) {
   const stored = useMemo(() => loadAiConfig(), [])
 
   const [provider, setProvider] = useState(stored?.provider ?? defaultAiConfig.provider)
@@ -32,6 +33,7 @@ function Settings({ user }) {
     stored?.openai?.model ?? defaultAiConfig.openai.model
   )
   const [openaiApiKey, setOpenaiApiKey] = useState(stored?.openai?.apiKey ?? '')
+  const [weeklyGoal, setWeeklyGoal] = useState(() => loadWeeklyGoal(user?.id))
 
   const persist = () => {
     const config = {
@@ -109,7 +111,58 @@ function Settings({ user }) {
   return (
     <div className="space-y-4">
       <Card title="Profile" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <p className="text-sm text-slate-600">用户：{user?.username ?? 'unknown'}</p>
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">用户：{user?.username ?? 'unknown'}</p>
+          <Button
+            block
+            color="warning"
+            fill="outline"
+            onClick={() => {
+              onLogout?.()
+              Toast.show({ content: '已退出登录' })
+            }}
+          >
+            退出登录 / 切换账号
+          </Button>
+        </div>
+      </Card>
+
+      <Card
+        title="Habit"
+        className="rounded-2xl border border-slate-100 bg-white shadow-sm"
+      >
+        <List>
+          <List.Item>
+            <Input
+              type="number"
+              inputMode="numeric"
+              placeholder="周目标分钟数（默认 300）"
+              value={String(weeklyGoal ?? '')}
+              onChange={(value) => setWeeklyGoal(value)}
+              clearable
+            />
+          </List.Item>
+        </List>
+        <div className="mt-3">
+          <Button
+            block
+            fill="outline"
+            onClick={() => {
+              const minutes = Number.parseInt(String(weeklyGoal), 10)
+              if (!Number.isFinite(minutes) || minutes <= 0) {
+                Toast.show({ content: '请输入有效的周目标分钟数' })
+                return
+              }
+              saveWeeklyGoal(user?.id, minutes)
+              Toast.show({ content: '周目标已保存' })
+            }}
+          >
+            保存周目标
+          </Button>
+          <p className="mt-2 text-xs text-slate-400">
+            首次默认 300 分钟/周，可随时调整。
+          </p>
+        </div>
       </Card>
 
       <Card title="AI Provider" className="rounded-2xl border border-slate-100 bg-white shadow-sm">

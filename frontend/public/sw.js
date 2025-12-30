@@ -1,6 +1,6 @@
 /* eslint-disable no-restricted-globals */
 
-const CACHE_NAME = 'chromastudy-shell-v1'
+const CACHE_NAME = 'chromastudy-shell-v2'
 const CORE_ASSETS = [
   '/',
   '/index.html',
@@ -39,6 +39,17 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
 
+  // Don't cache dev server modules or API calls.
+  if (
+    url.pathname.startsWith('/@') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/node_modules/') ||
+    url.pathname.startsWith('/api/')
+  ) {
+    event.respondWith(fetch(request))
+    return
+  }
+
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
@@ -65,4 +76,3 @@ self.addEventListener('fetch', (event) => {
     })
   )
 })
-

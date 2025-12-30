@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
-import { Card, Dialog, Toast } from 'antd-mobile'
+import { Button, Card, Toast } from 'antd-mobile'
+import { useNavigate } from 'react-router-dom'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getStudyLogs } from '../services/api.js'
 
 function getHeatColor(duration) {
@@ -11,8 +13,10 @@ function getHeatColor(duration) {
 }
 
 function Calendar({ user }) {
+  const navigate = useNavigate()
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(false)
+  const [monthCursor, setMonthCursor] = useState(() => dayjs().startOf('month'))
 
   useEffect(() => {
     if (!user?.id) {
@@ -37,8 +41,8 @@ function Calendar({ user }) {
   }, [logs])
 
   const days = useMemo(() => {
-    const startOfMonth = dayjs().startOf('month')
-    const endOfMonth = dayjs().endOf('month')
+    const startOfMonth = monthCursor.startOf('month')
+    const endOfMonth = monthCursor.endOf('month')
     const startDate = startOfMonth.startOf('week')
     const endDate = endOfMonth.endOf('week')
     const result = []
@@ -56,36 +60,41 @@ function Calendar({ user }) {
       cursor = cursor.add(1, 'day')
     }
     return result
-  }, [logMap])
+  }, [logMap, monthCursor])
 
   const handleSelect = (day) => {
-    const title = day.date
-    if (!day.duration) {
-      Dialog.alert({
-        title,
-        content: '当天没有学习记录，明天继续加油。',
-        confirmText: '知道了',
-      })
-      return
-    }
-    if (!day.feedback) {
-      Dialog.alert({
-        title,
-        content: 'AI 点评生成中，请稍后再来查看。',
-        confirmText: '知道了',
-      })
-      return
-    }
-    Dialog.alert({
-      title,
-      content: day.feedback,
-      confirmText: '知道了',
-    })
+    navigate(`/day/${day.date}`)
   }
 
   return (
     <div className="space-y-4">
-      <Card title="Calendar Heatmap" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+      <Card
+        title="Calendar Heatmap"
+        extra={
+          <div className="flex items-center gap-2">
+            <Button
+              size="small"
+              fill="outline"
+              onClick={() => setMonthCursor((prev) => prev.subtract(1, 'month'))}
+              disabled={loading}
+            >
+              <ChevronLeft size={16} />
+            </Button>
+            <div className="min-w-[6.5rem] text-center text-sm font-semibold text-slate-700">
+              {monthCursor.format('YYYY-MM')}
+            </div>
+            <Button
+              size="small"
+              fill="outline"
+              onClick={() => setMonthCursor((prev) => prev.add(1, 'month'))}
+              disabled={loading}
+            >
+              <ChevronRight size={16} />
+            </Button>
+          </div>
+        }
+        className="rounded-2xl border border-slate-100 bg-white shadow-sm"
+      >
         <div className="grid grid-cols-7 gap-2">
           {days.map((day) => (
             <button
