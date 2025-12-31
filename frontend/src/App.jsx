@@ -117,8 +117,10 @@ function Shell() {
     location.pathname === '/focus' ||
     location.pathname.startsWith('/review')
 
+  const shellClassName = hideTabBar ? 'app-shell app-shell--no-tabbar' : 'app-shell app-shell--tabbar'
+
   return (
-    <div className="app-shell">
+    <div className={shellClassName}>
       <header className="flex items-center justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">ChromaStudy</p>
@@ -132,7 +134,7 @@ function Shell() {
         </div>
       </header>
 
-      <main className="flex-1">
+      <main className="app-main flex-1 min-h-0">
         <Routes>
           <Route path="/" element={<Today user={user} syncTick={syncTick} />} />
           <Route path="/calendar" element={<Calendar user={user} syncTick={syncTick} />} />
