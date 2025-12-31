@@ -59,3 +59,17 @@ export function sortByOrder(items, order) {
   const rest = Array.from(map.values()).sort((a, b) => a.id - b.id)
   return [...sorted, ...rest]
 }
+
+export function sortByTaskOrder(items, order) {
+  const index = new Map(order.map((id, idx) => [id, idx]))
+  return [...items].sort((a, b) => {
+    const aKey = Number.isFinite(a?.taskId) ? a.taskId : a.id
+    const bKey = Number.isFinite(b?.taskId) ? b.taskId : b.id
+    const aIndex = index.has(aKey) ? index.get(aKey) : Number.MAX_SAFE_INTEGER
+    const bIndex = index.has(bKey) ? index.get(bKey) : Number.MAX_SAFE_INTEGER
+    if (aIndex !== bIndex) return aIndex - bIndex
+    const aDate = String(a?.plannedDate || '')
+    const bDate = String(b?.plannedDate || '')
+    return aDate.localeCompare(bDate)
+  })
+}

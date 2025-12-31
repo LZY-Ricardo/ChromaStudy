@@ -10,11 +10,12 @@ datasource db {
 }
 
 model User {
-  id        Int        @id @default(autoincrement())
-  username  String     @unique
-  password  String
-  studyLogs StudyLog[]
-  tasks     Task[]
+  id                Int                @id @default(autoincrement())
+  username          String             @unique
+  password          String
+  studyLogs         StudyLog[]
+  tasks             Task[]
+  pushSubscriptions PushSubscription[]
 }
 
 model StudyLog {
@@ -33,10 +34,74 @@ model StudyLog {
 model Task {
   id          Int     @id @default(autoincrement())
   title       String
+  description String?
   isDone      Boolean @default(false)
+  dueTime         String?                  // HH:mm
+  priority        Int?
+  category        String?
+  labels          String?                  // JSON
+  repeatRule      String?                  // RRULE string
+  repeatStartDate String?                  // YYYY-MM-DD
+  repeatTimeZone  String?
+  reminderTimes   String?                  // JSON (HH:mm array)
   plannedDate String? // 计划完成日期，格式 YYYY-MM-DD
   userId      Int
   user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  overrides   TaskOccurrenceOverride[]
+  reminders   TaskReminderInstance[]
 
   @@index([plannedDate])
+  @@index([repeatRule])
+  @@index([userId])
+}
+
+model TaskOccurrenceOverride {
+  id             Int      @id @default(autoincrement())
+  taskId         Int
+  occurrenceDate String   // YYYY-MM-DD
+  overrideDate   String?  // YYYY-MM-DD
+  title          String?
+  description    String?
+  dueTime        String?
+  priority       Int?
+  category       String?
+  labels         String?  // JSON
+  isCancelled    Boolean  @default(false)
+  isDone         Boolean  @default(false)
+  doneAt         DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  task           Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, occurrenceDate])
+  @@index([occurrenceDate])
+}
+
+model TaskReminderInstance {
+  id             Int      @id @default(autoincrement())
+  taskId         Int
+  occurrenceDate String   // YYYY-MM-DD
+  remindAt       DateTime
+  status         String   @default("pending")
+  sentAt         DateTime?
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  task           Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, occurrenceDate, remindAt])
+  @@index([remindAt, status])
+}
+
+model PushSubscription {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  endpoint       String   @unique
+  keys           String   // JSON
+  expirationTime String?
+  createdAt      DateTime @default(now())
+  lastUsedAt     DateTime?
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

@@ -6,6 +6,9 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 const express = require("express");
 const cors = require("cors");
 const { prisma } = require("./prismaClient");
+const { rrulestr } = require("rrule");
+const { CronJob } = require("cron");
+const webpush = require("web-push");
 
 const app = express();
 app.use(cors());
@@ -15,6 +18,21 @@ const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
 const ollamaModel = process.env.OLLAMA_MODEL || "llama3";
 
 const PORT = Number(process.env.PORT) || 3001;
+const OCCURRENCE_LOOKBACK_DAYS = 30;
+const OCCURRENCE_LOOKAHEAD_DAYS = 90;
+const REMINDER_LOOKAHEAD_DAYS = 30;
+const DONE_RETENTION_DAYS = 30;
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || "";
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "";
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:admin@example.com";
+const PUSH_READY = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+const PUSH_URGENCY = "normal";
+const PUSH_TTL_SECONDS = 60 * 60;
+
+if (PUSH_READY) {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
 
 function normalizeBaseUrl(value) {
   if (typeof value !== "string") {
@@ -71,6 +89,119 @@ function clampErrorText(text, max = 300) {
   const normalized = String(text || "").replace(/\s+/g, " ").trim();
   if (normalized.length <= max) return normalized;
   return normalized.slice(0, max);
+}
+
+function isValidDateString(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
+function isValidTimeString(value) {
+  return typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value.trim());
+}
+
+function normalizeOptionalString(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
+function normalizeDateValue(value) {
+  if (value === null || value === "") return null;
+  if (!isValidDateString(value)) return null;
+  return String(value).trim();
+}
+
+function normalizeTimeValue(value) {
+  if (value === null || value === "") return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  return isValidTimeString(text) ? text : null;
+}
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeTimeList(value) {
+  const items = normalizeStringList(value);
+  const normalized = [];
+  const seen = new Set();
+  for (const item of items) {
+    if (!isValidTimeString(item)) {
+      return { ok: false, list: [], error: `invalid time: ${item}` };
+    }
+    if (seen.has(item)) continue;
+    seen.add(item);
+    normalized.push(item);
+  }
+  return { ok: true, list: normalized, error: "" };
+}
+
+function serializeStringList(list) {
+  if (!Array.isArray(list) || list.length === 0) return null;
+  return JSON.stringify(list);
+}
+
+function parseStoredStringList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function dateFromYmd(value) {
+  if (!isValidDateString(value)) return null;
+  const [year, month, day] = value.split("-").map((item) => Number(item));
+  const date = new Date(year, month - 1, day);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function combineDateTime(dateStr, timeStr) {
+  const base = dateFromYmd(dateStr);
+  if (!base || !isValidTimeString(timeStr)) return null;
+  const [hours, minutes] = timeStr.split(":").map((item) => Number(item));
+  base.setHours(hours, minutes, 0, 0);
+  return base;
+}
+
+function resolveDateRange({ start, end, lookbackDays, lookaheadDays }) {
+  const today = new Date();
+  const startDate = dateFromYmd(start) || addDays(today, -(lookbackDays ?? 0));
+  const endDate = dateFromYmd(end) || addDays(today, lookaheadDays ?? 0);
+  if (startDate) startDate.setHours(0, 0, 0, 0);
+  if (endDate) endDate.setHours(0, 0, 0, 0);
+  return {
+    startDate,
+    endDate,
+    startKey: startDate ? toDateString(startDate) : "",
+    endKey: endDate ? toDateString(endDate) : "",
+  };
 }
 
 const OPENAI_MODELS_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -211,6 +342,436 @@ function toDateString(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function stripRRulePrefix(value) {
+  return String(value || "").trim().replace(/^RRULE:/i, "").trim();
+}
+
+function normalizeTaskPayload(input, { requireTitle = false } = {}) {
+  const data = {};
+  const has = (key) => Object.prototype.hasOwnProperty.call(input || {}, key);
+
+  if (requireTitle || has("title")) {
+    const title = typeof input?.title === "string" ? input.title.trim() : "";
+    if (requireTitle && !title) {
+      return { ok: false, error: "title is required", data: {} };
+    }
+    if (title) {
+      data.title = title;
+    }
+  }
+
+  if (has("description")) {
+    data.description = normalizeOptionalString(input.description);
+  }
+
+  if (has("plannedDate")) {
+    const normalized = normalizeDateValue(input.plannedDate);
+    if (input.plannedDate && !normalized) {
+      return { ok: false, error: "plannedDate must be YYYY-MM-DD format", data: {} };
+    }
+    data.plannedDate = normalized;
+  }
+
+  if (has("dueTime")) {
+    const normalized = normalizeTimeValue(input.dueTime);
+    if (input.dueTime && !normalized) {
+      return { ok: false, error: "dueTime must be HH:mm format", data: {} };
+    }
+    data.dueTime = normalized;
+  }
+
+  if (has("priority")) {
+    if (input.priority === null || input.priority === "") {
+      data.priority = null;
+    } else {
+      const parsed = Number.parseInt(String(input.priority), 10);
+      if (!Number.isFinite(parsed)) {
+        return { ok: false, error: "priority must be a number", data: {} };
+      }
+      data.priority = parsed;
+    }
+  }
+
+  if (has("category")) {
+    data.category = normalizeOptionalString(input.category);
+  }
+
+  if (has("labels")) {
+    const list = normalizeStringList(input.labels);
+    data.labels = serializeStringList(list);
+  }
+
+  if (has("repeatRule")) {
+    const value = normalizeOptionalString(input.repeatRule);
+    data.repeatRule = value ? stripRRulePrefix(value) : null;
+  }
+
+  if (has("repeatStartDate")) {
+    const normalized = normalizeDateValue(input.repeatStartDate);
+    if (input.repeatStartDate && !normalized) {
+      return { ok: false, error: "repeatStartDate must be YYYY-MM-DD format", data: {} };
+    }
+    data.repeatStartDate = normalized;
+  }
+
+  if (has("repeatTimeZone")) {
+    data.repeatTimeZone = normalizeOptionalString(input.repeatTimeZone);
+  }
+
+  if (has("reminderTimes")) {
+    const normalized = normalizeTimeList(input.reminderTimes);
+    if (!normalized.ok) {
+      return { ok: false, error: "reminderTimes must be HH:mm list", data: {} };
+    }
+    data.reminderTimes = serializeStringList(normalized.list);
+  }
+
+  return { ok: true, error: "", data };
+}
+
+function buildRRuleFromTask(task) {
+  const ruleText = stripRRulePrefix(task?.repeatRule);
+  const startDate = normalizeDateValue(task?.repeatStartDate || task?.plannedDate);
+  if (!ruleText || !startDate) return null;
+  const start = dateFromYmd(startDate);
+  if (!start) return null;
+  const dtstart = start.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  try {
+    return rrulestr(`DTSTART:${dtstart}\nRRULE:${ruleText}`);
+  } catch (error) {
+    console.error("Invalid RRULE:", error?.message);
+    return null;
+  }
+}
+
+function buildOccurrenceItem(task, override, occurrenceDate, plannedDate, options = {}) {
+  const labels = parseStoredStringList(override?.labels || task.labels);
+  const reminderTimes = parseStoredStringList(task.reminderTimes);
+  const isRecurring = Boolean(task.repeatRule);
+
+  return {
+    id: isRecurring ? `${task.id}:${occurrenceDate}` : task.id,
+    taskId: task.id,
+    occurrenceDate: occurrenceDate || null,
+    plannedDate: plannedDate || null,
+    title: override?.title ?? task.title,
+    description: override?.description ?? task.description ?? "",
+    dueTime: override?.dueTime ?? task.dueTime ?? null,
+    priority: override?.priority ?? task.priority ?? null,
+    category: override?.category ?? task.category ?? null,
+    labels,
+    reminderTimes,
+    isDone: isRecurring ? Boolean(override?.isDone) : task.isDone,
+    isRecurring,
+    isCancelled: Boolean(override?.isCancelled),
+    isRescheduled: Boolean(options.isRescheduled),
+    repeatRule: task.repeatRule || null,
+    repeatStartDate: task.repeatStartDate || null,
+    repeatTimeZone: task.repeatTimeZone || null,
+  };
+}
+
+function buildTaskOccurrences(task, overrides, rangeStart, rangeEnd) {
+  if (!task.repeatRule) {
+    if (!task.plannedDate) {
+      return [buildOccurrenceItem(task, null, null, null)];
+    }
+    return [buildOccurrenceItem(task, null, task.plannedDate, task.plannedDate)];
+  }
+
+  const rule = buildRRuleFromTask(task);
+  if (!rule) {
+    if (!task.plannedDate) {
+      return [buildOccurrenceItem(task, null, null, null)];
+    }
+    return [buildOccurrenceItem(task, null, task.plannedDate, task.plannedDate)];
+  }
+
+  const overrideMap = new Map(
+    (Array.isArray(overrides) ? overrides : []).map((item) => [item.occurrenceDate, item])
+  );
+  const baseDates = rule.between(rangeStart, rangeEnd, true).map((date) => toDateString(date));
+  const seen = new Set();
+  const items = [];
+
+  for (const date of baseDates) {
+    if (seen.has(date)) continue;
+    seen.add(date);
+    const override = overrideMap.get(date);
+    if (override?.isCancelled) {
+      continue;
+    }
+    if (override?.overrideDate) {
+      continue;
+    }
+    items.push(buildOccurrenceItem(task, override, date, date));
+  }
+
+  for (const override of overrideMap.values()) {
+    if (!override?.overrideDate) continue;
+    const overrideDate = normalizeDateValue(override.overrideDate);
+    if (!overrideDate) continue;
+    const dateObj = dateFromYmd(overrideDate);
+    if (!dateObj) continue;
+    if (dateObj < rangeStart || dateObj > rangeEnd) continue;
+    items.push(buildOccurrenceItem(task, override, override.occurrenceDate, overrideDate, { isRescheduled: true }));
+  }
+
+  return items;
+}
+
+async function fetchOverridesForTask(taskId, startKey, endKey) {
+  if (!taskId) return [];
+  return prisma.taskOccurrenceOverride.findMany({
+    where: {
+      taskId,
+      OR: [
+        {
+          occurrenceDate: {
+            gte: startKey,
+            lte: endKey,
+          },
+        },
+        {
+          overrideDate: {
+            gte: startKey,
+            lte: endKey,
+          },
+        },
+      ],
+    },
+  });
+}
+
+function isDateInRange(dateStr, startKey, endKey) {
+  if (!dateStr) return false;
+  if (startKey && dateStr < startKey) return false;
+  if (endKey && dateStr > endKey) return false;
+  return true;
+}
+
+async function cancelRemindersForOccurrence(taskId, occurrenceDate) {
+  if (!taskId || !occurrenceDate) return;
+  await prisma.taskReminderInstance.updateMany({
+    where: { taskId, occurrenceDate, status: "pending" },
+    data: { status: "cancelled" },
+  });
+}
+
+async function refreshTaskReminders(task) {
+  const reminderTimes = parseStoredStringList(task?.reminderTimes);
+  const now = new Date();
+
+  await prisma.taskReminderInstance.deleteMany({
+    where: {
+      taskId: task.id,
+      status: "pending",
+      remindAt: { gte: now },
+    },
+  });
+
+  if (reminderTimes.length === 0) {
+    return;
+  }
+
+  const range = resolveDateRange({
+    lookbackDays: 0,
+    lookaheadDays: REMINDER_LOOKAHEAD_DAYS,
+  });
+
+  const overrides = await fetchOverridesForTask(task.id, range.startKey, range.endKey);
+  const occurrences = buildTaskOccurrences(task, overrides, range.startDate, range.endDate);
+  const data = [];
+
+  for (const item of occurrences) {
+    if (!item.plannedDate) continue;
+    if (!isDateInRange(item.plannedDate, range.startKey, range.endKey)) continue;
+    if (item.isDone || item.isCancelled) continue;
+
+    for (const time of reminderTimes) {
+      const remindAt = combineDateTime(item.plannedDate, time);
+      if (!remindAt || remindAt <= now) continue;
+      data.push({
+        taskId: task.id,
+        occurrenceDate: item.occurrenceDate || item.plannedDate,
+        remindAt,
+      });
+    }
+  }
+
+  if (data.length > 0) {
+    await prisma.taskReminderInstance.createMany({
+      data,
+    });
+  }
+}
+
+async function refreshAllReminders() {
+  const tasks = await prisma.task.findMany({
+    where: {
+      reminderTimes: { not: null },
+    },
+  });
+
+  for (const task of tasks) {
+    await refreshTaskReminders(task);
+  }
+}
+
+async function cleanupOldRecords() {
+  const cutoff = addDays(new Date(), -DONE_RETENTION_DAYS);
+  await prisma.taskOccurrenceOverride.deleteMany({
+    where: {
+      doneAt: { lt: cutoff },
+    },
+  });
+  await prisma.taskReminderInstance.deleteMany({
+    where: {
+      status: { not: "pending" },
+      remindAt: { lt: cutoff },
+    },
+  });
+}
+
+function buildReminderPayload(task, occurrenceDate) {
+  const dateLabel = occurrenceDate || "";
+  const timeLabel = task?.dueTime ? ` ${task.dueTime}` : "";
+  const suffix = dateLabel ? ` · ${dateLabel}${timeLabel}` : "";
+  return JSON.stringify({
+    title: "任务提醒",
+    body: `${task?.title || "任务"}${suffix}`,
+    taskId: task?.id,
+    occurrenceDate,
+    url: "/",
+  });
+}
+
+function parseSubscriptionRecord(record) {
+  if (!record?.endpoint || !record?.keys) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(record.keys);
+  } catch {
+    return null;
+  }
+  if (!parsed?.p256dh || !parsed?.auth) return null;
+  return {
+    endpoint: record.endpoint,
+    keys: {
+      p256dh: parsed.p256dh,
+      auth: parsed.auth,
+    },
+  };
+}
+
+let reminderTickRunning = false;
+
+async function sendDueReminders() {
+  if (!PUSH_READY || reminderTickRunning) return;
+  reminderTickRunning = true;
+
+  try {
+    const now = new Date();
+    const due = await prisma.taskReminderInstance.findMany({
+      where: {
+        status: "pending",
+        remindAt: { lte: now },
+      },
+      include: {
+        task: true,
+      },
+    });
+
+    for (const reminder of due) {
+      const task = reminder.task;
+      if (!task) {
+        await prisma.taskReminderInstance.update({
+          where: { id: reminder.id },
+          data: { status: "cancelled" },
+        });
+        continue;
+      }
+
+      if (task.repeatRule) {
+        const override = await prisma.taskOccurrenceOverride.findUnique({
+          where: {
+            taskId_occurrenceDate: {
+              taskId: task.id,
+              occurrenceDate: reminder.occurrenceDate,
+            },
+          },
+        });
+        if (override?.isDone || override?.isCancelled) {
+          await prisma.taskReminderInstance.update({
+            where: { id: reminder.id },
+            data: { status: "cancelled" },
+          });
+          continue;
+        }
+      } else if (task.isDone) {
+        await prisma.taskReminderInstance.update({
+          where: { id: reminder.id },
+          data: { status: "cancelled" },
+        });
+        continue;
+      }
+
+      const subscriptions = await prisma.pushSubscription.findMany({
+        where: { userId: task.userId },
+      });
+
+      if (subscriptions.length === 0) {
+        await prisma.taskReminderInstance.update({
+          where: { id: reminder.id },
+          data: { status: "skipped", lastError: "no_subscription" },
+        });
+        continue;
+      }
+
+      const payload = buildReminderPayload(task, reminder.occurrenceDate);
+      let delivered = false;
+      let lastError = "";
+
+      for (const record of subscriptions) {
+        const subscription = parseSubscriptionRecord(record);
+        if (!subscription) {
+          await prisma.pushSubscription.delete({ where: { id: record.id } });
+          continue;
+        }
+
+        try {
+          await webpush.sendNotification(subscription, payload, {
+            TTL: PUSH_TTL_SECONDS,
+            urgency: PUSH_URGENCY,
+          });
+          delivered = true;
+          await prisma.pushSubscription.update({
+            where: { id: record.id },
+            data: { lastUsedAt: new Date() },
+          });
+        } catch (error) {
+          lastError = String(error?.message || "push_failed");
+          const status = error?.statusCode || error?.status;
+          if (status === 404 || status === 410) {
+            await prisma.pushSubscription.delete({ where: { id: record.id } });
+          }
+        }
+      }
+
+      await prisma.taskReminderInstance.update({
+        where: { id: reminder.id },
+        data: {
+          status: delivered ? "sent" : "failed",
+          sentAt: delivered ? new Date() : null,
+          lastError: delivered ? null : lastError || "push_failed",
+        },
+      });
+    }
+  } finally {
+    reminderTickRunning = false;
+  }
 }
 
 function normalizeFeedback(text) {
@@ -679,37 +1240,199 @@ app.get(
   })
 );
 
+app.get(
+  "/api/task-occurrences",
+  asyncHandler(async (req, res) => {
+    const userId = Number(req.query.userId);
+    const start = typeof req.query.start === "string" ? req.query.start.trim() : "";
+    const end = typeof req.query.end === "string" ? req.query.end.trim() : "";
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+
+    if (start && !isValidDateString(start)) {
+      return res.status(400).json({ error: "start must be YYYY-MM-DD format" });
+    }
+    if (end && !isValidDateString(end)) {
+      return res.status(400).json({ error: "end must be YYYY-MM-DD format" });
+    }
+
+    const range = resolveDateRange({
+      start,
+      end,
+      lookbackDays: OCCURRENCE_LOOKBACK_DAYS,
+      lookaheadDays: OCCURRENCE_LOOKAHEAD_DAYS,
+    });
+
+    const tasks = await prisma.task.findMany({
+      where: { userId },
+      orderBy: { id: "asc" },
+    });
+
+    if (tasks.length === 0) {
+      return res.json({ items: [] });
+    }
+
+    const taskIds = tasks.map((task) => task.id);
+    const overrides = await prisma.taskOccurrenceOverride.findMany({
+      where: {
+        taskId: { in: taskIds },
+        OR: [
+          {
+            occurrenceDate: {
+              gte: range.startKey,
+              lte: range.endKey,
+            },
+          },
+          {
+            overrideDate: {
+              gte: range.startKey,
+              lte: range.endKey,
+            },
+          },
+        ],
+      },
+    });
+
+    const overridesByTask = new Map();
+    for (const override of overrides) {
+      if (!override) continue;
+      const list = overridesByTask.get(override.taskId) || [];
+      list.push(override);
+      overridesByTask.set(override.taskId, list);
+    }
+
+    const items = [];
+    for (const task of tasks) {
+      const taskOverrides = overridesByTask.get(task.id) || [];
+      items.push(...buildTaskOccurrences(task, taskOverrides, range.startDate, range.endDate));
+    }
+
+    return res.json({ items });
+  })
+);
+
+app.get(
+  "/api/push/vapid-public-key",
+  asyncHandler(async (req, res) => {
+    if (!PUSH_READY) {
+      return res.status(500).json({ error: "push is not configured" });
+    }
+    return res.json({ publicKey: VAPID_PUBLIC_KEY });
+  })
+);
+
+app.post(
+  "/api/push/subscribe",
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const userId = Number(payload.userId);
+    const subscription = payload.subscription || {};
+    const endpoint = typeof subscription.endpoint === "string" ? subscription.endpoint.trim() : "";
+    const keys = subscription.keys || {};
+
+    if (!PUSH_READY) {
+      return res.status(500).json({ error: "push is not configured" });
+    }
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+    if (!endpoint || typeof keys?.p256dh !== "string" || typeof keys?.auth !== "string") {
+      return res.status(400).json({ error: "invalid subscription" });
+    }
+
+    const record = await prisma.pushSubscription.upsert({
+      where: { endpoint },
+      create: {
+        userId,
+        endpoint,
+        keys: JSON.stringify({ p256dh: keys.p256dh, auth: keys.auth }),
+        expirationTime:
+          subscription.expirationTime != null ? String(subscription.expirationTime) : null,
+      },
+      update: {
+        userId,
+        keys: JSON.stringify({ p256dh: keys.p256dh, auth: keys.auth }),
+        expirationTime:
+          subscription.expirationTime != null ? String(subscription.expirationTime) : null,
+        lastUsedAt: new Date(),
+      },
+    });
+
+    return res.json({ ok: true, id: record.id });
+  })
+);
+
+app.post(
+  "/api/push/unsubscribe",
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const userId = Number(payload.userId);
+    const endpoint =
+      typeof payload.endpoint === "string"
+        ? payload.endpoint.trim()
+        : typeof payload.subscription?.endpoint === "string"
+          ? payload.subscription.endpoint.trim()
+          : "";
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+    if (!endpoint) {
+      return res.status(400).json({ error: "endpoint is required" });
+    }
+
+    await prisma.pushSubscription.deleteMany({
+      where: { userId, endpoint },
+    });
+
+    return res.json({ ok: true });
+  })
+);
+
 app.post(
   "/api/tasks",
   asyncHandler(async (req, res) => {
-    const { userId, title, plannedDate } = req.body || {};
-    const normalizedUserId = Number(userId);
+    const payload = req.body || {};
+    const normalizedUserId = Number(payload.userId);
 
     if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
       return res.status(400).json({ error: "userId must be a positive integer" });
     }
 
-    if (!title) {
-      return res.status(400).json({ error: "title is required" });
-    }
-
     // 验证 plannedDate 格式（如果提供）
-    let normalizedPlannedDate = null;
-    if (plannedDate) {
-      const dateStr = String(plannedDate).trim();
-      if (dateStr && !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-        return res.status(400).json({ error: "plannedDate must be YYYY-MM-DD format" });
-      }
-      normalizedPlannedDate = dateStr || null;
+    const normalized = normalizeTaskPayload(payload, { requireTitle: true });
+    if (!normalized.ok) {
+      return res.status(400).json({ error: normalized.error });
     }
 
-    const task = await prisma.task.create({
-      data: {
-        userId: normalizedUserId,
-        title,
-        plannedDate: normalizedPlannedDate,
-      },
-    });
+    const data = {
+      userId: normalizedUserId,
+      ...normalized.data,
+    };
+
+    if (data.repeatRule) {
+      if (!data.repeatStartDate) {
+        data.repeatStartDate = data.plannedDate || toDateString();
+      }
+      if (!data.plannedDate) {
+        data.plannedDate = data.repeatStartDate;
+      }
+    }
+
+    if (data.reminderTimes && !(data.plannedDate || data.repeatStartDate)) {
+      return res
+        .status(400)
+        .json({ error: "reminderTimes requires plannedDate or repeatStartDate" });
+    }
+
+    const task = await prisma.task.create({ data });
+    try {
+      await refreshTaskReminders(task);
+    } catch (error) {
+      console.error("refreshTaskReminders failed:", error);
+    }
 
     return res.json(task);
   })
@@ -719,29 +1442,53 @@ app.patch(
   "/api/tasks/:id",
   asyncHandler(async (req, res) => {
     const taskId = Number(req.params.id);
-    const { title, isDone, plannedDate } = req.body || {};
+    const payload = req.body || {};
 
     if (!Number.isInteger(taskId) || taskId <= 0) {
       return res.status(400).json({ error: "id must be a positive integer" });
     }
 
-    const updates = {};
-    if (typeof title === "string") {
-      updates.title = title;
+    const normalized = normalizeTaskPayload(payload);
+    if (!normalized.ok) {
+      return res.status(400).json({ error: normalized.error });
     }
-    if (typeof isDone === "boolean") {
-      updates.isDone = isDone;
+
+    const updates = {
+      ...normalized.data,
+    };
+
+    if (typeof payload.isDone === "boolean") {
+      updates.isDone = payload.isDone;
     }
-    if (plannedDate !== undefined) {
-      if (plannedDate === null || plannedDate === "") {
-        updates.plannedDate = null;
-      } else {
-        const dateStr = String(plannedDate).trim();
-        if (dateStr && !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-          return res.status(400).json({ error: "plannedDate must be YYYY-MM-DD format" });
-        }
-        updates.plannedDate = dateStr || null;
+
+    const hasField = (key) => Object.prototype.hasOwnProperty.call(payload, key);
+    const existing = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!existing) {
+      return res.status(404).json({ error: "task not found" });
+    }
+
+    if (hasField("repeatRule")) {
+      if (!updates.repeatRule) {
+        updates.repeatRule = null;
+        updates.repeatStartDate = null;
+        updates.repeatTimeZone = null;
+      } else if (!updates.repeatStartDate) {
+        updates.repeatStartDate =
+          existing.repeatStartDate || updates.plannedDate || existing.plannedDate || toDateString();
       }
+    }
+
+    if (updates.repeatRule && !updates.plannedDate && !existing.plannedDate) {
+      updates.plannedDate = updates.repeatStartDate || toDateString();
+    }
+
+    if (
+      updates.reminderTimes &&
+      !(updates.plannedDate || existing.plannedDate || updates.repeatStartDate || existing.repeatStartDate)
+    ) {
+      return res
+        .status(400)
+        .json({ error: "reminderTimes requires plannedDate or repeatStartDate" });
     }
 
     if (Object.keys(updates).length === 0) {
@@ -753,7 +1500,150 @@ app.patch(
       data: updates,
     });
 
+    try {
+      await refreshTaskReminders(updated);
+    } catch (error) {
+      console.error("refreshTaskReminders failed:", error);
+    }
+
     return res.json(updated);
+  })
+);
+
+app.patch(
+  "/api/task-occurrences",
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const userId = Number(payload.userId);
+    const taskId = Number(payload.taskId);
+    const occurrenceDate =
+      typeof payload.occurrenceDate === "string" ? payload.occurrenceDate.trim() : "";
+    const updatesPayload =
+      payload.updates && typeof payload.updates === "object" ? payload.updates : null;
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+    if (!Number.isInteger(taskId) || taskId <= 0) {
+      return res.status(400).json({ error: "taskId must be a positive integer" });
+    }
+    if (!isValidDateString(occurrenceDate)) {
+      return res.status(400).json({ error: "occurrenceDate must be YYYY-MM-DD format" });
+    }
+    if (!updatesPayload) {
+      return res.status(400).json({ error: "updates is required" });
+    }
+
+    const task = await prisma.task.findFirst({
+      where: { id: taskId, userId },
+    });
+    if (!task) {
+      return res.status(404).json({ error: "task not found" });
+    }
+    if (!task.repeatRule) {
+      return res.status(400).json({ error: "task is not recurring" });
+    }
+
+    const normalized = normalizeTaskPayload(updatesPayload);
+    if (!normalized.ok) {
+      return res.status(400).json({ error: normalized.error });
+    }
+
+    const hasField = (key) => Object.prototype.hasOwnProperty.call(updatesPayload, key);
+    const overrideData = {};
+
+    if (hasField("title")) {
+      overrideData.title = normalized.data.title ?? null;
+    }
+    if (hasField("description")) {
+      overrideData.description = normalized.data.description ?? null;
+    }
+    if (hasField("dueTime")) {
+      overrideData.dueTime = normalized.data.dueTime ?? null;
+    }
+    if (hasField("priority")) {
+      overrideData.priority = normalized.data.priority ?? null;
+    }
+    if (hasField("category")) {
+      overrideData.category = normalized.data.category ?? null;
+    }
+    if (hasField("labels")) {
+      overrideData.labels = normalized.data.labels ?? null;
+    }
+    if (hasField("plannedDate")) {
+      const plannedDate = normalized.data.plannedDate ?? null;
+      overrideData.overrideDate =
+        plannedDate && plannedDate !== occurrenceDate ? plannedDate : null;
+    }
+    if (typeof updatesPayload.isDone === "boolean") {
+      overrideData.isDone = updatesPayload.isDone;
+      overrideData.doneAt = updatesPayload.isDone ? new Date() : null;
+    }
+    if (typeof updatesPayload.isCancelled === "boolean") {
+      overrideData.isCancelled = updatesPayload.isCancelled;
+    }
+
+    const meaningfulKeys = [
+      "title",
+      "description",
+      "dueTime",
+      "priority",
+      "category",
+      "labels",
+      "overrideDate",
+    ];
+    const hasMeaningful = meaningfulKeys.some(
+      (key) => overrideData[key] !== null && overrideData[key] !== undefined
+    );
+    const hasStatus = overrideData.isDone === true || overrideData.isCancelled === true;
+
+    const where = { taskId_occurrenceDate: { taskId, occurrenceDate } };
+    const existing = await prisma.taskOccurrenceOverride.findUnique({ where });
+
+    if (!hasMeaningful && !hasStatus) {
+      if (existing) {
+        await prisma.taskOccurrenceOverride.delete({ where });
+        try {
+          await refreshTaskReminders(task);
+        } catch (error) {
+          console.error("refreshTaskReminders failed:", error);
+        }
+      }
+
+      return res.json({
+        item: buildOccurrenceItem(task, null, occurrenceDate, occurrenceDate),
+      });
+    }
+
+    const saved = existing
+      ? await prisma.taskOccurrenceOverride.update({
+          where,
+          data: overrideData,
+        })
+      : await prisma.taskOccurrenceOverride.create({
+          data: {
+            taskId,
+            occurrenceDate,
+            ...overrideData,
+          },
+        });
+
+    if (overrideData.isDone === true || overrideData.isCancelled === true) {
+      await cancelRemindersForOccurrence(taskId, occurrenceDate);
+    }
+
+    try {
+      await refreshTaskReminders(task);
+    } catch (error) {
+      console.error("refreshTaskReminders failed:", error);
+    }
+
+    const plannedDate = saved.overrideDate || occurrenceDate;
+    return res.json({
+      item: buildOccurrenceItem(task, saved, occurrenceDate, plannedDate, {
+        isRescheduled: Boolean(saved.overrideDate),
+      }),
+    });
   })
 );
 
@@ -1214,22 +2104,42 @@ app.post("/api/chat", (req, res) => {
     return !res.writableEnded && res.writable;
   };
 
-  // 立即发送一个开始信号，保持连接活跃
-  if (isWritable()) {
-    console.log("[CHAT] Sending start signal");
-    res.write(`event: start\ndata: {}\n\n`);
-  }
-
   if (aiConfig.provider === "openai") {
     const controller = new AbortController();
+    let streamStarted = false;
+    let responseEnded = false;
 
-    req.on("close", () => {
-      console.log("[CHAT] Client closed connection detected");
+    const onClientClose = () => {
+      if (responseEnded || res.writableEnded) {
+        console.log("[CHAT] Client connection closed normally (stream completed)");
+        return;
+      }
+      if (!streamStarted) {
+        console.log("[CHAT] Client closed connection prematurely (before stream started)");
+      } else {
+        console.log("[CHAT] Client closed connection during stream");
+      }
       controller.abort();
-    });
+    };
+
+    res.on("close", onClientClose);
 
     const allMessages = [systemMessage, ...normalizedMessages];
-    fetch(`${aiConfig.baseUrl}/chat/completions`, {
+    const fetchUrl = `${aiConfig.baseUrl}/chat/completions`;
+    console.log("[CHAT] Fetching OpenAI at:", fetchUrl);
+
+    // 立即发送一个空注释来保持连接活跃
+    if (isWritable()) {
+      res.write(": keep-alive\n\n");
+      if (res.flush) res.flush();
+    }
+    console.log("[CHAT] Request body:", JSON.stringify({
+      model: aiConfig.model,
+      stream: true,
+      messages: allMessages,
+    }).substring(0, 200) + "...");
+
+    fetch(fetchUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1243,6 +2153,7 @@ app.post("/api/chat", (req, res) => {
       signal: controller.signal,
     })
       .then(async (openaiRes) => {
+        console.log("[CHAT] OpenAI response status:", openaiRes.status);
         if (!openaiRes.ok || !openaiRes.body) {
           const body = await openaiRes.text().catch(() => "");
           console.error("[CHAT] OpenAI error status:", openaiRes.status, body);
@@ -1250,14 +2161,23 @@ app.post("/api/chat", (req, res) => {
             res.write(
               `event: error\ndata: ${JSON.stringify({ error: "openai_error" })}\n\n`
             );
+            responseEnded = true;
             res.end();
           }
           return;
         }
 
+        console.log("[CHAT] Starting to read OpenAI stream...");
+        streamStarted = true;
         const reader = openaiRes.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let contentChunkCount = 0;
+        const splitSseEvents = (input) => {
+          const parts = input.split(/\r?\n\r?\n/);
+          const rest = parts.pop() || "";
+          return { parts, rest };
+        };
 
         while (true) {
           const { value, done } = await reader.read();
@@ -1265,8 +2185,8 @@ app.post("/api/chat", (req, res) => {
           if (!isWritable()) break;
 
           buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() || "";
+          const { parts, rest } = splitSseEvents(buffer);
+          buffer = rest;
 
           for (const part of parts) {
             const lines = part.split("\n");
@@ -1275,8 +2195,10 @@ app.post("/api/chat", (req, res) => {
               const payload = line.replace(/^data:\s*/, "").trim();
               if (!payload) continue;
               if (payload === "[DONE]") {
+                console.log("[CHAT] OpenAI stream completed, total chunks:", contentChunkCount);
                 if (isWritable()) {
                   res.write("event: done\ndata: {}\n\n");
+                  responseEnded = true;
                   res.end();
                 }
                 return;
@@ -1286,6 +2208,7 @@ app.post("/api/chat", (req, res) => {
                 const parsed = JSON.parse(payload);
                 const content = parsed?.choices?.[0]?.delta?.content ?? "";
                 if (content) {
+                  contentChunkCount++;
                   res.write(`data: ${JSON.stringify({ content })}\n\n`);
                 }
               } catch (error) {
@@ -1295,8 +2218,10 @@ app.post("/api/chat", (req, res) => {
           }
         }
 
+        console.log("[CHAT] OpenAI stream ended, total chunks:", contentChunkCount);
         if (isWritable()) {
           res.write("event: done\ndata: {}\n\n");
+          responseEnded = true;
           res.end();
         }
       })
@@ -1307,6 +2232,7 @@ app.post("/api/chat", (req, res) => {
         console.error("[CHAT] OpenAI request error:", error);
         if (isWritable()) {
           res.write(`event: error\ndata: ${JSON.stringify({ error: "request_failed" })}\n\n`);
+          responseEnded = true;
           res.end();
         }
       });
@@ -1417,6 +2343,38 @@ app.post("/api/chat", (req, res) => {
   ollamaReq.write(ollamaBody);
   ollamaReq.end();
 });
+
+if (PUSH_READY) {
+  CronJob.from({
+    cronTime: "* * * * *",
+    onTick: () => {
+      sendDueReminders().catch((error) => console.error("reminder tick failed", error));
+    },
+    start: true,
+  });
+} else {
+  console.warn("Push is not configured. Reminder delivery disabled.");
+}
+
+CronJob.from({
+  cronTime: "10 0 * * *",
+  onTick: () => {
+    refreshAllReminders().catch((error) => console.error("reminder refresh failed", error));
+  },
+  start: true,
+});
+
+CronJob.from({
+  cronTime: "20 0 * * *",
+  onTick: () => {
+    cleanupOldRecords().catch((error) => console.error("cleanup failed", error));
+  },
+  start: true,
+});
+
+setTimeout(() => {
+  refreshAllReminders().catch((error) => console.error("reminder warmup failed", error));
+}, 2000);
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);

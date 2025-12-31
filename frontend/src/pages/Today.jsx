@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import dayjs from 'dayjs'
 import {
+  ActionSheet,
   Button,
   Card,
   Dialog,
   Input,
   List,
+  Selector,
   SwipeAction,
   Switch,
   Tag,
@@ -23,17 +25,20 @@ import {
   deleteTask,
   decomposeTasks,
   generateAiFeedback,
+  getTaskOccurrences,
   getStudyLogs,
   getTasks,
   getStudyLogByDate,
+  updateTaskOccurrence,
   updateTask,
 } from '../services/api.js'
 import { loadAiConfig } from '../utils/storage.js'
-import { loadTaskOrder, saveTaskOrder, sortByOrder } from '../utils/taskOrder.js'
+import { loadTaskOrder, saveTaskOrder, sortByOrder, sortByTaskOrder } from '../utils/taskOrder.js'
 import { loadWeeklyGoal } from '../utils/habit.js'
 import { countDueReviewCards } from '../utils/flashcards.js'
 import { useNavigate } from 'react-router-dom'
 import ShareDialog from '../components/ShareCard.jsx'
+import { ensurePushSubscription } from '../utils/push.js'
 
 function SortableTaskItem({ task, disabled, onToggle }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -127,23 +132,130 @@ const DATE_GROUP_LABELS = {
   noDate: { label: '无日期', color: 'default', icon: null },
 }
 
+const PRIORITY_OPTIONS = [
+  { label: '低', value: 1 },
+  { label: '中', value: 2 },
+  { label: '高', value: 3 },
+]
+
+const REPEAT_OPTIONS = [
+  { label: '不重复', value: 'none' },
+  { label: '每天', value: 'daily' },
+  { label: '每周', value: 'weekly' },
+  { label: '每月', value: 'monthly' },
+]
+
+const WEEKDAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
+const WEEKDAY_OPTIONS = [
+  { label: '周一', value: 'MO' },
+  { label: '周二', value: 'TU' },
+  { label: '周三', value: 'WE' },
+  { label: '周四', value: 'TH' },
+  { label: '周五', value: 'FR' },
+  { label: '周六', value: 'SA' },
+  { label: '周日', value: 'SU' },
+]
+const FUTURE_PREVIEW_LIMIT = 10
+
+
+function normalizeTimeInput(value) {
+  const text = String(value || '').trim()
+  if (!text) return null
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(text) ? text : null
+}
+
+function parseTimeListInput(value) {
+  const raw = String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  if (raw.length === 0) {
+    return { ok: true, list: [] }
+  }
+  const list = []
+  const seen = new Set()
+  for (const item of raw) {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(item)) {
+      return { ok: false, list: [], error: `提醒时间格式错误：${item}` }
+    }
+    if (seen.has(item)) continue
+    seen.add(item)
+    list.push(item)
+  }
+  return { ok: true, list }
+}
+
+function parseLabelInput(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function parseRepeatRule(rule) {
+  const text = String(rule || '').toUpperCase()
+  if (!text) return { type: 'none', days: [] }
+  if (text.includes('FREQ=DAILY')) return { type: 'daily', days: [] }
+  if (text.includes('FREQ=MONTHLY')) return { type: 'monthly', days: [] }
+  if (text.includes('FREQ=WEEKLY')) {
+    const match = text.match(/BYDAY=([A-Z,]+)/)
+    const days = match ? match[1].split(',').filter(Boolean) : []
+    return { type: 'weekly', days }
+  }
+  return { type: 'none', days: [] }
+}
+
+function buildRepeatRule({ type, days, plannedDate }) {
+  if (!type || type === 'none') {
+    return { repeatRule: null, repeatStartDate: null }
+  }
+  const startDate = plannedDate || dayjs().format('YYYY-MM-DD')
+  if (type === 'daily') {
+    return { repeatRule: 'FREQ=DAILY', repeatStartDate: startDate }
+  }
+  if (type === 'weekly') {
+    const fallbackDay = WEEKDAY_CODES[dayjs(startDate).day()]
+    const byDay = Array.isArray(days) && days.length > 0 ? days : [fallbackDay]
+    return { repeatRule: `FREQ=WEEKLY;BYDAY=${byDay.join(',')}`, repeatStartDate: startDate }
+  }
+  if (type === 'monthly') {
+    const byMonthDay = dayjs(startDate).date()
+    return {
+      repeatRule: `FREQ=MONTHLY;BYMONTHDAY=${byMonthDay}`,
+      repeatStartDate: startDate,
+    }
+  }
+  return { repeatRule: null, repeatStartDate: null }
+}
+
 function Today({ user, syncTick }) {
   const navigate = useNavigate()
   const todayLabel = dayjs().format('dddd, MMM D')
   const todayKey = dayjs().format('YYYY-MM-DD')
   const [tasks, setTasks] = useState([])
+  const [taskItems, setTaskItems] = useState([])
   const [taskOrder, setTaskOrder] = useState([])
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(false)
   const [checkinOpen, setCheckinOpen] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
+  const [taskDetailOpen, setTaskDetailOpen] = useState(false)
   const [manageTasks, setManageTasks] = useState(false)
   const [showDoneTasks, setShowDoneTasks] = useState(false)
   const [taskViewMode, setTaskViewMode] = useState('focus') // 'focus' | 'all'
+  const [futureExpanded, setFutureExpanded] = useState(false)
   const [duration, setDuration] = useState('')
   const [content, setContent] = useState('')
   const [taskTitle, setTaskTitle] = useState('')
   const [taskPlannedDate, setTaskPlannedDate] = useState(null)
+  const [taskDescription, setTaskDescription] = useState('')
+  const [taskDueTime, setTaskDueTime] = useState('')
+  const [taskPriority, setTaskPriority] = useState(null)
+  const [taskCategory, setTaskCategory] = useState('')
+  const [taskLabels, setTaskLabels] = useState('')
+  const [taskRepeatType, setTaskRepeatType] = useState('none')
+  const [taskRepeatDays, setTaskRepeatDays] = useState([])
+  const [taskReminderTimes, setTaskReminderTimes] = useState('')
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [savingCheckin, setSavingCheckin] = useState(false)
   const [savingTask, setSavingTask] = useState(false)
@@ -151,6 +263,16 @@ function Today({ user, syncTick }) {
   const [editingTask, setEditingTask] = useState(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [editingPlannedDate, setEditingPlannedDate] = useState(null)
+  const [editingDescription, setEditingDescription] = useState('')
+  const [editingDueTime, setEditingDueTime] = useState('')
+  const [editingPriority, setEditingPriority] = useState(null)
+  const [editingCategory, setEditingCategory] = useState('')
+  const [editingLabels, setEditingLabels] = useState('')
+  const [editingRepeatType, setEditingRepeatType] = useState('none')
+  const [editingRepeatDays, setEditingRepeatDays] = useState([])
+  const [editingReminderTimes, setEditingReminderTimes] = useState('')
+  const [editingScope, setEditingScope] = useState('series')
+  const [editDetailOpen, setEditDetailOpen] = useState(false)
   const [showEditDatePicker, setShowEditDatePicker] = useState(false)
   const [showSuggestDialog, setShowSuggestDialog] = useState(false)
   const feedbackPollingRef = useRef(false)
@@ -158,6 +280,20 @@ function Today({ user, syncTick }) {
   const [aiGoal, setAiGoal] = useState('')
   const [aiConstraints, setAiConstraints] = useState('')
   const [aiGeneratedTasks, setAiGeneratedTasks] = useState([])
+  const [aiAddOpen, setAiAddOpen] = useState(false)
+  const [aiTaskDrafts, setAiTaskDrafts] = useState([])
+  const [aiSelectedIds, setAiSelectedIds] = useState([])
+  const [aiBatchPlannedDate, setAiBatchPlannedDate] = useState(null)
+  const [aiBatchDueTime, setAiBatchDueTime] = useState('')
+  const [aiBatchPriority, setAiBatchPriority] = useState(null)
+  const [aiBatchCategory, setAiBatchCategory] = useState('')
+  const [aiBatchLabels, setAiBatchLabels] = useState('')
+  const [aiBatchRepeatType, setAiBatchRepeatType] = useState('none')
+  const [aiBatchRepeatDays, setAiBatchRepeatDays] = useState([])
+  const [aiBatchReminderTimes, setAiBatchReminderTimes] = useState('')
+  const [aiEditingDraft, setAiEditingDraft] = useState(null)
+  const [showAiBatchDatePicker, setShowAiBatchDatePicker] = useState(false)
+  const [showAiEditDatePicker, setShowAiEditDatePicker] = useState(false)
   const [aiWorking, setAiWorking] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [showFillPrompt, setShowFillPrompt] = useState(false)
@@ -167,14 +303,27 @@ function Today({ user, syncTick }) {
     () => logs.find((log) => log.date === todayKey),
     [logs, todayKey]
   )
-  const completedCount = tasks.filter((task) => task.isDone).length
+  const completedCount = taskItems.filter((task) => task.isDone).length
+
+  const occurrenceRange = useMemo(() => {
+    const start = dayjs(todayKey).subtract(30, 'day').format('YYYY-MM-DD')
+    const end = dayjs(todayKey).add(90, 'day').format('YYYY-MM-DD')
+    return { start, end }
+  }, [todayKey])
 
   // 按日期分组任务
   const taskGroups = useMemo(() => {
-    const grouped = groupTasksByDate(tasks, todayKey)
+    const grouped = groupTasksByDate(taskItems, todayKey)
     // 对每个分组内的任务按排序顺序排列
     return Object.fromEntries(
-      Object.entries(grouped).map(([key, tasks]) => [key, sortByOrder(tasks, taskOrder)])
+      Object.entries(grouped).map(([key, items]) => [key, sortByTaskOrder(items, taskOrder)])
+    )
+  }, [taskItems, taskOrder, todayKey])
+
+  const manageGroups = useMemo(() => {
+    const grouped = groupTasksByDate(tasks, todayKey)
+    return Object.fromEntries(
+      Object.entries(grouped).map(([key, items]) => [key, sortByOrder(items, taskOrder)])
     )
   }, [tasks, taskOrder, todayKey])
 
@@ -186,6 +335,18 @@ function Today({ user, syncTick }) {
       noDate: taskGroups.noDate,
     }
   }, [taskGroups])
+
+  const manageFocusGroups = useMemo(() => {
+    return {
+      overdue: manageGroups.overdue,
+      today: manageGroups.today,
+      noDate: manageGroups.noDate,
+    }
+  }, [manageGroups])
+
+  const displayedManageGroups = taskViewMode === 'focus' ? manageFocusGroups : manageGroups
+  const allAiSelected =
+    aiTaskDrafts.length > 0 && aiSelectedIds.length === aiTaskDrafts.length
 
   // 当前显示的分组
   const displayedGroups = taskViewMode === 'focus' ? focusModeGroups : taskGroups
@@ -254,11 +415,13 @@ function Today({ user, syncTick }) {
     const load = async () => {
       setLoading(true)
       try {
-        const [taskData, logData] = await Promise.all([
+        const [taskData, occurrenceData, logData] = await Promise.all([
           getTasks(user.id),
+          getTaskOccurrences(user.id, occurrenceRange.start, occurrenceRange.end),
           getStudyLogs(user.id),
         ])
         setTasks(taskData)
+        setTaskItems(occurrenceData)
         const storedOrder = loadTaskOrder(user.id)
         const allIds = taskData.map((task) => task.id)
         const mergedOrder = [
@@ -275,7 +438,11 @@ function Today({ user, syncTick }) {
       }
     }
     load()
-  }, [syncTick, user?.id])
+  }, [occurrenceRange.end, occurrenceRange.start, syncTick, user?.id])
+
+  useEffect(() => {
+    setFutureExpanded(false)
+  }, [taskViewMode, manageTasks])
 
   const pollFeedbackIfNeeded = async () => {
     if (!user?.id) return
@@ -321,6 +488,85 @@ function Today({ user, syncTick }) {
     } catch {
       Toast.show({ content: '刷新失败' })
     }
+  }
+
+  const refreshTaskOccurrences = async () => {
+    if (!user?.id) return
+    try {
+      const data = await getTaskOccurrences(user.id, occurrenceRange.start, occurrenceRange.end)
+      setTaskItems(data)
+    } catch {
+      Toast.show({ content: '浠诲姟鍒楄〃鍔犺浇澶辫触' })
+    }
+  }
+
+  const buildTaskPayload = (draft) => {
+    const title = String(draft?.title || '').trim()
+    if (!title) {
+      return { ok: false, error: '璇疯緭鍏ヤ换鍔″唴瀹?' }
+    }
+
+    const plannedDate = draft?.plannedDate || null
+    const dueTime = draft?.dueTime ? normalizeTimeInput(draft.dueTime) : null
+    if (draft?.dueTime && !dueTime) {
+      return { ok: false, error: '鎴鏃堕棿鏍煎紡闇€瑕佷负 HH:mm' }
+    }
+
+    const reminders = parseTimeListInput(draft?.reminderTimes || '')
+    if (!reminders.ok) {
+      return { ok: false, error: reminders.error }
+    }
+
+    const labels = parseLabelInput(draft?.labels || '')
+    const category = String(draft?.category || '').trim()
+    const description = String(draft?.description || '').trim()
+    const priority =
+      Number.isFinite(draft?.priority) || typeof draft?.priority === 'number'
+        ? draft.priority
+        : null
+
+    const repeat = buildRepeatRule({
+      type: draft?.repeatType || 'none',
+      days: draft?.repeatDays || [],
+      plannedDate: plannedDate || todayKey,
+    })
+    const repeatRule = repeat.repeatRule || null
+    const repeatStartDate = repeat.repeatStartDate || null
+    const repeatTimeZone = repeatRule ? Intl.DateTimeFormat().resolvedOptions().timeZone : null
+
+    return {
+      ok: true,
+      payload: {
+        title,
+        description: description || null,
+        plannedDate: plannedDate || repeatStartDate || null,
+        dueTime,
+        priority,
+        category: category || null,
+        labels,
+        reminderTimes: reminders.list,
+        repeatRule,
+        repeatStartDate,
+        repeatTimeZone,
+      },
+    }
+  }
+
+  const resetEditingState = () => {
+    setEditingTask(null)
+    setEditingTitle('')
+    setEditingDescription('')
+    setEditingPlannedDate(null)
+    setEditingDueTime('')
+    setEditingPriority(null)
+    setEditingCategory('')
+    setEditingLabels('')
+    setEditingRepeatType('none')
+    setEditingRepeatDays([])
+    setEditingReminderTimes('')
+    setEditingScope('series')
+    setEditDetailOpen(false)
+    setShowEditDatePicker(false)
   }
 
   const generateTodayFeedback = async () => {
@@ -383,7 +629,7 @@ function Today({ user, syncTick }) {
     }
   }
 
-  const handleCreateTask = async () => {
+  const handleCreateTaskLegacy = async () => {
     const title = taskTitle.trim()
     if (!title) {
       Toast.show({ content: '请输入任务内容' })
@@ -401,6 +647,62 @@ function Today({ user, syncTick }) {
       setTaskOpen(false)
       setTaskTitle('')
       setTaskPlannedDate(null)
+      Toast.show({ content: '任务已添加' })
+    } catch {
+      Toast.show({ content: '新增任务失败' })
+    } finally {
+      setSavingTask(false)
+    }
+  }
+
+  const handleCreateTask = async () => {
+    const built = buildTaskPayload({
+      title: taskTitle,
+      description: taskDescription,
+      plannedDate: taskPlannedDate,
+      dueTime: taskDueTime,
+      priority: taskPriority,
+      category: taskCategory,
+      labels: taskLabels,
+      repeatType: taskRepeatType,
+      repeatDays: taskRepeatDays,
+      reminderTimes: taskReminderTimes,
+    })
+    if (!built.ok) {
+      Toast.show({ content: built.error })
+      return
+    }
+
+    if (built.payload.reminderTimes?.length) {
+      try {
+        await ensurePushSubscription(user.id)
+        } catch {
+          Toast.show({ content: '\u63d0\u9192\u8ba2\u9605\u5931\u8d25\uff0c\u4ecd\u53ef\u7ee7\u7eed\u4fdd\u5b58\u4efb\u52a1' })
+        }
+    }
+
+    setSavingTask(true)
+    try {
+      const task = await createTask(user.id, built.payload)
+      setTasks((prev) => [...prev, task])
+      setTaskOrder((prev) => {
+        const next = [...prev.filter((id) => id !== task.id), task.id]
+        saveTaskOrder(user.id, next)
+        return next
+      })
+      await refreshTaskOccurrences()
+      setTaskOpen(false)
+      setTaskTitle('')
+      setTaskPlannedDate(null)
+      setTaskDescription('')
+      setTaskDueTime('')
+      setTaskPriority(null)
+      setTaskCategory('')
+      setTaskLabels('')
+      setTaskRepeatType('none')
+      setTaskRepeatDays([])
+      setTaskReminderTimes('')
+      setTaskDetailOpen(false)
       Toast.show({ content: '任务已添加' })
     } catch {
       Toast.show({ content: '新增任务失败' })
@@ -431,7 +733,7 @@ function Today({ user, syncTick }) {
     }
   }
 
-  const addGeneratedTasks = async () => {
+  const addGeneratedTasksLegacy = async () => {
     if (!user?.id) return
     if (!aiGeneratedTasks.length) {
       Toast.show({ content: '暂无可添加的任务' })
@@ -477,7 +779,129 @@ function Today({ user, syncTick }) {
     }
   }
 
-  const handleToggleTask = async (task, value) => {
+  const addGeneratedTasks = () => {
+    if (!user?.id) return
+    if (!aiGeneratedTasks.length) {
+      Toast.show({ content: '鏆傛棤鍙坊鍔犵殑浠诲姟' })
+      return
+    }
+
+    const drafts = aiGeneratedTasks.map((item, index) => {
+      const title = String(item?.title ?? '').trim()
+      const estimateMinutes = Number.parseInt(String(item?.estimateMinutes ?? ''), 10)
+      const id = `${Date.now()}-${index}`
+      return {
+        id,
+        title,
+        estimateMinutes: Number.isFinite(estimateMinutes) ? estimateMinutes : null,
+        description: '',
+        plannedDate: null,
+        dueTime: '',
+        priority: null,
+        category: '',
+        labels: '',
+        repeatType: 'none',
+        repeatDays: [],
+        reminderTimes: '',
+      }
+    })
+
+    setAiTaskDrafts(drafts)
+    setAiSelectedIds(drafts.map((draft) => draft.id))
+    setAiBatchPlannedDate(null)
+    setAiBatchDueTime('')
+    setAiBatchPriority(null)
+    setAiBatchCategory('')
+    setAiBatchLabels('')
+    setAiBatchRepeatType('none')
+    setAiBatchRepeatDays([])
+    setAiBatchReminderTimes('')
+    setAiAddOpen(true)
+    setAiDecomposeOpen(false)
+  }
+
+  const applyBatchToSelected = (updates) => {
+    if (!aiSelectedIds.length) return
+    setAiTaskDrafts((prev) =>
+      prev.map((draft) =>
+        aiSelectedIds.includes(draft.id) ? { ...draft, ...updates } : draft
+      )
+    )
+  }
+
+  const saveAiEditingDraft = () => {
+    if (!aiEditingDraft) return
+    setAiTaskDrafts((prev) =>
+      prev.map((draft) => (draft.id === aiEditingDraft.id ? aiEditingDraft : draft))
+    )
+    setAiEditingDraft(null)
+  }
+
+  const submitGeneratedTasks = async () => {
+    if (!user?.id) return
+    if (aiWorking) return
+    const selected = aiTaskDrafts.filter((draft) => aiSelectedIds.includes(draft.id))
+    if (!selected.length) {
+      Toast.show({ content: '请先选择要添加的任务' })
+      return
+    }
+
+    const payloads = []
+    for (const draft of selected) {
+      const built = buildTaskPayload(draft)
+      if (!built.ok) {
+        Toast.show({ content: built.error })
+        return
+      }
+      payloads.push(built.payload)
+    }
+    setAiWorking(true)
+    try {
+      if (payloads.some((payload) => payload.reminderTimes?.length)) {
+        try {
+          await ensurePushSubscription(user.id)
+        } catch {
+          Toast.show({ content: '\u63d0\u9192\u8ba2\u9605\u5931\u8d25\uff0c\u4ecd\u53ef\u7ee7\u7eed\u4fdd\u5b58\u4efb\u52a1' })
+        }
+      }
+      const created = []
+      for (const payload of payloads) {
+        const task = await createTask(user.id, payload)
+        created.push(task)
+      }
+
+      if (created.length === 0) {
+        Toast.show({ content: '没有可添加的任务' })
+        return
+      }
+
+      setTasks((prev) => [...prev, ...created])
+      setTaskOrder((prev) => {
+        const next = [...prev]
+        for (const task of created) {
+          next.push(task.id)
+        }
+        saveTaskOrder(user.id, next)
+        return next
+      })
+
+      await refreshTaskOccurrences()
+      setAiTaskDrafts([])
+      setAiSelectedIds([])
+      setAiAddOpen(false)
+      setAiDecomposeOpen(false)
+      setAiGeneratedTasks([])
+      setAiGoal('')
+      setAiConstraints('')
+      Toast.show({ content: `已添加 ${created.length} 个任务` })
+    } catch {
+      Toast.show({ content: '添加任务失败' })
+    } finally {
+      setAiWorking(false)
+    }
+  }
+
+  const handleToggleTaskLegacy = async (task, value) => {
     setUpdatingTaskId(task.id)
     try {
       const updated = await updateTask(user.id, task.id, { isDone: value })
@@ -489,13 +913,94 @@ function Today({ user, syncTick }) {
     }
   }
 
-  const handleEditTask = (task) => {
-    setEditingTask(task)
-    setEditingTitle(task.title)
-    setEditingPlannedDate(task.plannedDate || null)
+  const handleToggleTask = async (task, value) => {
+    if (!user?.id) return
+    setUpdatingTaskId(task.id)
+    try {
+      if (task.isRecurring) {
+        const updated = await updateTaskOccurrence(
+          user.id,
+          task.taskId,
+          task.occurrenceDate,
+          { isDone: value }
+        )
+        if (updated) {
+          setTaskItems((prev) => prev.map((item) => (item.id === task.id ? updated : item)))
+        } else {
+          await refreshTaskOccurrences()
+        }
+      } else {
+        const updated = await updateTask(user.id, task.id, { isDone: value })
+        setTasks((prev) => prev.map((item) => (item.id === task.id ? updated : item)))
+        await refreshTaskOccurrences()
+      }
+    } catch {
+      Toast.show({ content: '鏇存柊浠诲姟鐘舵€佸け璐?' })
+    } finally {
+      setUpdatingTaskId(null)
+    }
   }
 
-  const handleSaveEdit = async () => {
+  const handleEditTask = (task) => {
+    if (!task) return
+
+    const openEditor = (scope) => {
+      const repeat = parseRepeatRule(task.repeatRule)
+      const hasLabels = Array.isArray(task.labels)
+        ? task.labels.length > 0
+        : Boolean(task.labels)
+      const hasReminders = Array.isArray(task.reminderTimes)
+        ? task.reminderTimes.length > 0
+        : Boolean(task.reminderTimes)
+      const hasDetails =
+        Boolean(task.description) ||
+        Boolean(task.dueTime) ||
+        task.priority != null ||
+        Boolean(task.category) ||
+        hasLabels ||
+        repeat.type !== 'none' ||
+        hasReminders
+      setEditDetailOpen(hasDetails)
+      setEditingScope(scope)
+      setEditingTask(task)
+      setEditingTitle(task.title || '')
+      setEditingDescription(task.description || '')
+      setEditingPlannedDate(task.plannedDate || null)
+      setEditingDueTime(task.dueTime || '')
+      setEditingPriority(task.priority ?? null)
+      setEditingCategory(task.category || '')
+      setEditingLabels(Array.isArray(task.labels) ? task.labels.join(', ') : '')
+      setEditingRepeatType(repeat.type)
+      setEditingRepeatDays(repeat.days)
+      setEditingReminderTimes(
+        Array.isArray(task.reminderTimes) ? task.reminderTimes.join(', ') : ''
+      )
+    }
+
+    if (task.isRecurring) {
+      ActionSheet.show({
+        actions: [
+          { key: 'single', text: '编辑本次' },
+          { key: 'series', text: '编辑整个系列' },
+        ],
+        cancelText: '取消',
+        closeOnAction: true,
+        onAction: (action) => {
+          if (action.key === 'single') {
+            openEditor('single')
+          }
+          if (action.key === 'series') {
+            openEditor('series')
+          }
+        },
+      })
+      return
+    }
+
+    openEditor('series')
+  }
+
+  const handleSaveEditLegacy = async () => {
     const title = editingTitle.trim()
     if (!editingTask || !title) {
       Toast.show({ content: '请输入任务内容' })
@@ -520,7 +1025,67 @@ function Today({ user, syncTick }) {
     }
   }
 
-  const handleDeleteTask = async (task) => {
+  const handleSaveEdit = async () => {
+    if (!editingTask || !user?.id) return
+
+    const built = buildTaskPayload({
+      title: editingTitle,
+      description: editingDescription,
+      plannedDate: editingPlannedDate,
+      dueTime: editingDueTime,
+      priority: editingPriority,
+      category: editingCategory,
+      labels: editingLabels,
+      repeatType: editingRepeatType,
+      repeatDays: editingRepeatDays,
+      reminderTimes: editingReminderTimes,
+    })
+    if (!built.ok) {
+      Toast.show({ content: built.error })
+      return
+    }
+
+    if (built.payload.reminderTimes?.length) {
+      try {
+        await ensurePushSubscription(user.id)
+      } catch {
+        Toast.show({ content: '提醒订阅失败，仍可继续保存任务' })
+      }
+    }
+
+    setUpdatingTaskId(editingTask.id)
+    try {
+      const baseId = editingTask.taskId ?? editingTask.id
+      if (editingScope === 'single' && editingTask.isRecurring) {
+        const updates = { ...built.payload }
+        delete updates.repeatRule
+        delete updates.repeatStartDate
+        delete updates.repeatTimeZone
+        delete updates.reminderTimes
+        const updated = await updateTaskOccurrence(
+          user.id,
+          baseId,
+          editingTask.occurrenceDate,
+          updates
+        )
+        if (updated) {
+          setTaskItems((prev) => prev.map((item) => (item.id === editingTask.id ? updated : item)))
+        }
+      } else {
+        const updated = await updateTask(user.id, baseId, built.payload)
+        setTasks((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      }
+      await refreshTaskOccurrences()
+      resetEditingState()
+      Toast.show({ content: '任务已更新' })
+    } catch {
+      Toast.show({ content: '更新任务失败' })
+    } finally {
+      setUpdatingTaskId(null)
+    }
+  }
+
+  const handleDeleteTaskLegacy = async (task) => {
     const result = await Dialog.confirm({
       title: '删除任务',
       content: `确定删除「${task.title}」吗？`,
@@ -545,6 +1110,70 @@ function Today({ user, syncTick }) {
     }
   }
 
+  const handleDeleteTask = async (task) => {
+    if (!task || !user?.id) return
+
+    const deleteSeries = async () => {
+      const baseId = task.taskId ?? task.id
+      const confirmed = await Dialog.confirm({
+        title: '删除任务',
+        content: `确定删除「${task.title}」吗？`,
+        confirmText: '删除',
+      })
+      if (!confirmed) return
+
+      setUpdatingTaskId(task.id)
+      try {
+        await deleteTask(user.id, baseId)
+        setTasks((prev) => prev.filter((item) => item.id !== baseId))
+        setTaskOrder((prev) => {
+          const next = prev.filter((id) => id !== baseId)
+          saveTaskOrder(user.id, next)
+          return next
+        })
+        await refreshTaskOccurrences()
+        Toast.show({ content: '已删除' })
+      } catch {
+        Toast.show({ content: '删除失败' })
+      } finally {
+        setUpdatingTaskId(null)
+      }
+    }
+
+    if (task.isRecurring) {
+      ActionSheet.show({
+        actions: [
+          { key: 'single', text: '删除本次' },
+          { key: 'series', text: '删除整个系列' },
+        ],
+        cancelText: '取消',
+        closeOnAction: true,
+        onAction: async (action) => {
+          if (action.key === 'single') {
+            setUpdatingTaskId(task.id)
+            try {
+              await updateTaskOccurrence(user.id, task.taskId, task.occurrenceDate, {
+                isCancelled: true,
+              })
+              await refreshTaskOccurrences()
+              Toast.show({ content: '已删除本次' })
+            } catch {
+              Toast.show({ content: '删除失败' })
+            } finally {
+              setUpdatingTaskId(null)
+            }
+          }
+          if (action.key === 'series') {
+            await deleteSeries()
+          }
+        },
+      })
+      return
+    }
+
+    await deleteSeries()
+  }
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
   const activeTasks = useMemo(
@@ -554,6 +1183,10 @@ function Today({ user, syncTick }) {
   const doneTasks = useMemo(
     () => sortByOrder(tasks.filter((task) => task.isDone), taskOrder),
     [tasks, taskOrder]
+  )
+  const doneTaskItems = useMemo(
+    () => sortByTaskOrder(taskItems.filter((task) => task.isDone), taskOrder),
+    [taskItems, taskOrder]
   )
 
   const handleDragEnd = (event) => {
@@ -578,7 +1211,9 @@ function Today({ user, syncTick }) {
 
   // 准备分享数据
   const getShareData = () => {
-    const completedTasks = tasks.filter((task) => task.isDone).map((task) => task.title)
+    const completedTasks = taskItems
+      .filter((task) => task.isDone && task.plannedDate === todayKey)
+      .map((task) => task.title)
     return {
       date: todayKey,
       duration: todayLog?.duration || 0,
@@ -594,7 +1229,9 @@ function Today({ user, syncTick }) {
 
   // 生成基于已完成任务的学习总结
   const generateContentFromTasks = () => {
-    const completedTasks = tasks.filter((task) => task.isDone)
+    const completedTasks = taskItems.filter(
+      (task) => task.isDone && task.plannedDate === todayKey
+    )
     if (completedTasks.length === 0) return ''
 
     const taskTitles = completedTasks.map((task) => task.title)
@@ -616,7 +1253,9 @@ function Today({ user, syncTick }) {
 
   // 打开打卡对话框时检查是否需要预填充提示
   const openCheckinDialog = () => {
-    const completedTasks = tasks.filter((task) => task.isDone)
+    const completedTasks = taskItems.filter(
+      (task) => task.isDone && task.plannedDate === todayKey
+    )
     if (completedTasks.length > 0 && !content.trim()) {
       const autoContent = generateContentFromTasks()
       setGeneratedContent(autoContent)
@@ -657,6 +1296,7 @@ function Today({ user, syncTick }) {
         const updatedMap = new Map(updated.map((t) => [t.id, t]))
         return prev.map((item) => updatedMap.get(item.id) || item)
       })
+      await refreshTaskOccurrences()
       setShowSuggestDialog(false)
       Toast.show({ content: `已将 ${noDateTasks.length} 个任务添加到今天` })
     } catch {
@@ -683,7 +1323,7 @@ function Today({ user, syncTick }) {
           </div>
           <div className="flex items-center gap-2">
             <Tag color={todayLog ? 'success' : 'warning'} fill="outline">
-              {completedCount}/{tasks.length} done
+              {completedCount}/{taskItems.length} done
             </Tag>
             <Button
               size="small"
@@ -843,7 +1483,7 @@ function Today({ user, syncTick }) {
         }
         className="rounded-2xl border border-slate-100 bg-white shadow-sm"
       >
-        {tasks.length === 0 ? (
+        {taskItems.length === 0 ? (
           <p className="text-sm text-slate-500">还没有任务，先创建一个吧。</p>
         ) : (
           <>
@@ -852,6 +1492,13 @@ function Today({ user, syncTick }) {
               if (groupTasks.length === 0) return null
               const groupConfig = DATE_GROUP_LABELS[groupKey]
               const Icon = groupConfig.icon
+
+              const isFutureGroup = groupKey === 'future'
+              const shouldCollapseFuture = isFutureGroup && !futureExpanded
+              const visibleTasks = shouldCollapseFuture
+                ? groupTasks.slice(0, FUTURE_PREVIEW_LIMIT)
+                : groupTasks
+              const hiddenCount = Math.max(groupTasks.length - visibleTasks.length, 0)
 
               return (
                 <div key={groupKey} className="mb-4 last:mb-0">
@@ -865,7 +1512,7 @@ function Today({ user, syncTick }) {
                     <span className="ml-1 text-slate-400">({groupTasks.length})</span>
                   </div>
                   <List>
-                    {groupTasks.map((task) => (
+                    {visibleTasks.map((task) => (
                       <SwipeAction
                         key={task.id}
                         closeOnAction
@@ -914,6 +1561,19 @@ function Today({ user, syncTick }) {
                       </SwipeAction>
                     ))}
                   </List>
+                  {isFutureGroup && groupTasks.length > FUTURE_PREVIEW_LIMIT && (
+                    <div className="mt-2 flex justify-end">
+                      <Button
+                        size="small"
+                        fill="none"
+                        onClick={() => setFutureExpanded((prev) => !prev)}
+                      >
+                        {futureExpanded
+                          ? '\u6536\u8d77\u672a\u6765\u4efb\u52a1'
+                          : `\u5c55\u5f00\u66f4\u591a (\u5269\u4f59${hiddenCount})`}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -939,7 +1599,7 @@ function Today({ user, syncTick }) {
             {manageTasks && (
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <div className="space-y-3">
-                  {Object.entries(displayedGroups).map(([groupKey, groupTasks]) => {
+                  {Object.entries(displayedManageGroups).map(([groupKey, groupTasks]) => {
                     if (groupTasks.length === 0) return null
                     const groupConfig = DATE_GROUP_LABELS[groupKey]
                     const Icon = groupConfig.icon
@@ -973,13 +1633,13 @@ function Today({ user, syncTick }) {
               </DndContext>
             )}
 
-            {showDoneTasks && doneTasks.length > 0 ? (
+            {showDoneTasks && doneTaskItems.length > 0 ? (
               <div className="mt-3">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
                   已完成
                 </p>
                 <List>
-                  {doneTasks.map((task) => (
+                  {doneTaskItems.map((task) => (
                     <SwipeAction
                       key={task.id}
                       closeOnAction
@@ -1042,7 +1702,16 @@ function Today({ user, syncTick }) {
           <Button block color="primary" size="large" onClick={openCheckinDialog}>
             完成学习
           </Button>
-          <Button block color="default" size="large" fill="outline" onClick={() => setTaskOpen(true)}>
+          <Button
+            block
+            color="default"
+            size="large"
+            fill="outline"
+            onClick={() => {
+              setTaskDetailOpen(false)
+              setTaskOpen(true)
+            }}
+          >
             添加任务
           </Button>
         </div>
@@ -1118,7 +1787,7 @@ function Today({ user, syncTick }) {
           <div className="space-y-3">
             <p className="text-sm text-slate-600">
               ✨ 检测到你今天完成了 <span className="font-semibold text-emerald-600">
-                {tasks.filter((task) => task.isDone).length}
+                {taskItems.filter((task) => task.isDone && task.plannedDate === todayKey).length}
               </span> 个任务，已为你生成学习总结模板：
             </p>
             <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
@@ -1206,6 +1875,337 @@ function Today({ user, syncTick }) {
       />
 
       <Dialog
+        visible={aiAddOpen}
+        title="添加拆解任务"
+        closeOnMaskClick={!aiWorking}
+        closeOnAction={false}
+        onClose={() => {
+          if (aiWorking) return
+          setAiAddOpen(false)
+        }}
+                actions={[
+          { key: 'cancel', text: '\u53d6\u6d88' },
+          {
+            key: 'submit',
+            text: aiWorking ? '\u6dfb\u52a0\u4e2d..' : '\u6dfb\u52a0',
+            bold: true,
+            disabled: aiWorking,
+          },
+        ]}
+        onAction={(action) => {
+          if (action.key === 'submit') {
+            submitGeneratedTasks()
+            return
+          }
+          if (!aiWorking) {
+            setAiAddOpen(false)
+          }
+        }}
+        content={
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-600">选择任务</span>
+              <Switch
+                checked={allAiSelected}
+                onChange={(value) => {
+                  setAiSelectedIds(value ? aiTaskDrafts.map((draft) => draft.id) : [])
+                }}
+              />
+            </div>
+            <List>
+              {aiTaskDrafts.map((draft) => {
+                const metaParts = []
+                if (draft.plannedDate) {
+                  metaParts.push(dayjs(draft.plannedDate).format('MM月DD日'))
+                }
+                if (draft.repeatType && draft.repeatType !== 'none') {
+                  const repeatLabel = REPEAT_OPTIONS.find((opt) => opt.value === draft.repeatType)?.label
+                  if (repeatLabel) metaParts.push(repeatLabel)
+                }
+                if (draft.priority) metaParts.push(`P${draft.priority}`)
+                const meta = metaParts.join(' · ')
+                return (
+                  <List.Item
+                    key={draft.id}
+                    prefix={
+                      <Switch
+                        checked={aiSelectedIds.includes(draft.id)}
+                        onChange={(value) => {
+                          setAiSelectedIds((prev) =>
+                            value ? [...prev, draft.id] : prev.filter((id) => id !== draft.id)
+                          )
+                        }}
+                      />
+                    }
+                    description={meta || '未设置详情'}
+                    extra={
+                      <Button
+                        size="mini"
+                        fill="outline"
+                        onClick={() => setAiEditingDraft(draft)}
+                      >
+                        编辑
+                      </Button>
+                    }
+                  >
+                    <span className="text-slate-700">
+                      {draft.title}
+                      {draft.estimateMinutes ? `（约${draft.estimateMinutes}m）` : ''}
+                    </span>
+                  </List.Item>
+                )
+              })}
+            </List>
+
+            <div className="rounded-xl bg-slate-50 p-3 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                批量设置
+              </p>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-600">计划日期</span>
+                <Button size="small" fill="outline" onClick={() => setShowAiBatchDatePicker(true)}>
+                  {aiBatchPlannedDate ? dayjs(aiBatchPlannedDate).format('MM月DD日') : '选择日期'}
+                </Button>
+              </div>
+              {aiBatchPlannedDate && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400">已选择</span>
+                  <Button
+                    size="mini"
+                    fill="none"
+                    color="danger"
+                    onClick={() => {
+                      setAiBatchPlannedDate(null)
+                      applyBatchToSelected({ plannedDate: null })
+                    }}
+                  >
+                    清除日期
+                  </Button>
+                </div>
+              )}
+              <Input
+                placeholder="截止时间（HH:mm）"
+                value={aiBatchDueTime}
+                onChange={(value) => {
+                  setAiBatchDueTime(value)
+                  applyBatchToSelected({ dueTime: value })
+                }}
+                clearable
+              />
+              <div className="space-y-2">
+                <span className="text-sm text-slate-600">优先级</span>
+                <Selector
+                  options={PRIORITY_OPTIONS}
+                  value={aiBatchPriority != null ? [aiBatchPriority] : []}
+                  onChange={(val) => {
+                    const next = val[0] ?? null
+                    setAiBatchPriority(next)
+                    applyBatchToSelected({ priority: next })
+                  }}
+                />
+              </div>
+              <Input
+                placeholder="分类（可选）"
+                value={aiBatchCategory}
+                onChange={(value) => {
+                  setAiBatchCategory(value)
+                  applyBatchToSelected({ category: value })
+                }}
+                clearable
+              />
+              <Input
+                placeholder="标签（逗号分隔）"
+                value={aiBatchLabels}
+                onChange={(value) => {
+                  setAiBatchLabels(value)
+                  applyBatchToSelected({ labels: value })
+                }}
+                clearable
+              />
+              <div className="space-y-2">
+                <span className="text-sm text-slate-600">重复</span>
+                <Selector
+                  options={REPEAT_OPTIONS}
+                  value={[aiBatchRepeatType]}
+                  onChange={(val) => {
+                    const next = val[0] ?? 'none'
+                    setAiBatchRepeatType(next)
+                    if (next !== 'weekly') {
+                      setAiBatchRepeatDays([])
+                    }
+                    applyBatchToSelected({ repeatType: next, repeatDays: next === 'weekly' ? aiBatchRepeatDays : [] })
+                  }}
+                />
+              </div>
+              {aiBatchRepeatType === 'weekly' && (
+                <Selector
+                  options={WEEKDAY_OPTIONS}
+                  value={aiBatchRepeatDays}
+                  multiple
+                  onChange={(val) => {
+                    setAiBatchRepeatDays(val)
+                    applyBatchToSelected({ repeatDays: val })
+                  }}
+                />
+              )}
+              <Input
+                placeholder="提醒时间（HH:mm，逗号分隔）"
+                value={aiBatchReminderTimes}
+                onChange={(value) => {
+                  setAiBatchReminderTimes(value)
+                  applyBatchToSelected({ reminderTimes: value })
+                }}
+                clearable
+              />
+            </div>
+          </div>
+        }
+      />
+
+      <Dialog
+        visible={!!aiEditingDraft}
+        title="编辑任务详情"
+        closeOnMaskClick
+        onClose={() => setAiEditingDraft(null)}
+        actions={[
+          { key: 'cancel', text: '取消' },
+          { key: 'submit', text: '保存', bold: true },
+        ]}
+        onAction={(action) => {
+          if (action.key === 'submit') {
+            saveAiEditingDraft()
+          } else {
+            setAiEditingDraft(null)
+          }
+        }}
+        content={
+          <div className="space-y-3">
+            <Input
+              placeholder="任务内容"
+              value={aiEditingDraft?.title || ''}
+              onChange={(value) =>
+                setAiEditingDraft((prev) => (prev ? { ...prev, title: value } : prev))
+              }
+              clearable
+            />
+            <TextArea
+              placeholder="任务描述（可选）"
+              value={aiEditingDraft?.description || ''}
+              onChange={(value) =>
+                setAiEditingDraft((prev) => (prev ? { ...prev, description: value } : prev))
+              }
+              rows={3}
+              showCount
+              maxLength={200}
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-600">计划日期</span>
+              <Button size="small" fill="outline" onClick={() => setShowAiEditDatePicker(true)}>
+                {aiEditingDraft?.plannedDate
+                  ? dayjs(aiEditingDraft.plannedDate).format('MM月DD日')
+                  : '选择日期'}
+              </Button>
+            </div>
+            <Input
+              placeholder="截止时间（HH:mm）"
+              value={aiEditingDraft?.dueTime || ''}
+              onChange={(value) =>
+                setAiEditingDraft((prev) => (prev ? { ...prev, dueTime: value } : prev))
+              }
+              clearable
+            />
+            <div className="space-y-2">
+              <span className="text-sm text-slate-600">优先级</span>
+              <Selector
+                options={PRIORITY_OPTIONS}
+                value={aiEditingDraft?.priority != null ? [aiEditingDraft.priority] : []}
+                onChange={(val) =>
+                  setAiEditingDraft((prev) =>
+                    prev ? { ...prev, priority: val[0] ?? null } : prev
+                  )
+                }
+              />
+            </div>
+            <Input
+              placeholder="分类（可选）"
+              value={aiEditingDraft?.category || ''}
+              onChange={(value) =>
+                setAiEditingDraft((prev) => (prev ? { ...prev, category: value } : prev))
+              }
+              clearable
+            />
+            <Input
+              placeholder="标签（逗号分隔）"
+              value={aiEditingDraft?.labels || ''}
+              onChange={(value) =>
+                setAiEditingDraft((prev) => (prev ? { ...prev, labels: value } : prev))
+              }
+              clearable
+            />
+            <div className="space-y-2">
+              <span className="text-sm text-slate-600">重复</span>
+              <Selector
+                options={REPEAT_OPTIONS}
+                value={[aiEditingDraft?.repeatType || 'none']}
+                onChange={(val) =>
+                  setAiEditingDraft((prev) => {
+                    if (!prev) return prev
+                    const next = val[0] ?? 'none'
+                    return {
+                      ...prev,
+                      repeatType: next,
+                      repeatDays: next === 'weekly' ? prev.repeatDays : [],
+                    }
+                  })
+                }
+              />
+            </div>
+            {aiEditingDraft?.repeatType === 'weekly' && (
+              <Selector
+                options={WEEKDAY_OPTIONS}
+                value={aiEditingDraft?.repeatDays || []}
+                multiple
+                onChange={(val) =>
+                  setAiEditingDraft((prev) => (prev ? { ...prev, repeatDays: val } : prev))
+                }
+              />
+            )}
+            <Input
+              placeholder="提醒时间（HH:mm，逗号分隔）"
+              value={aiEditingDraft?.reminderTimes || ''}
+              onChange={(value) =>
+                setAiEditingDraft((prev) => (prev ? { ...prev, reminderTimes: value } : prev))
+              }
+              clearable
+            />
+          </div>
+        }
+      />
+
+      <DatePicker
+        visible={showAiBatchDatePicker}
+        onClose={() => setShowAiBatchDatePicker(false)}
+        max={dayjs().add(90, 'day').toDate()}
+        onConfirm={(date) => {
+          const next = dayjs(date).format('YYYY-MM-DD')
+          setAiBatchPlannedDate(next)
+          applyBatchToSelected({ plannedDate: next })
+          setShowAiBatchDatePicker(false)
+        }}
+      />
+
+      <DatePicker
+        visible={showAiEditDatePicker}
+        onClose={() => setShowAiEditDatePicker(false)}
+        max={dayjs().add(90, 'day').toDate()}
+        onConfirm={(date) => {
+          const next = dayjs(date).format('YYYY-MM-DD')
+          setAiEditingDraft((prev) => (prev ? { ...prev, plannedDate: next } : prev))
+          setShowAiEditDatePicker(false)
+        }}
+      />
+
+      <Dialog
         visible={!!editingTask}
         title="编辑任务"
         closeOnMaskClick={updatingTaskId == null}
@@ -1214,9 +2214,7 @@ function Today({ user, syncTick }) {
           if (updatingTaskId != null) {
             return
           }
-          setEditingTask(null)
-          setEditingTitle('')
-          setEditingPlannedDate(null)
+          resetEditingState()
         }}
         actions={[
           { key: 'cancel', text: '取消' },
@@ -1231,9 +2229,7 @@ function Today({ user, syncTick }) {
           if (action.key === 'submit') {
             handleSaveEdit()
           } else {
-            setEditingTask(null)
-            setEditingTitle('')
-            setEditingPlannedDate(null)
+            resetEditingState()
           }
         }}
         content={
@@ -1267,6 +2263,76 @@ function Today({ user, syncTick }) {
                 </Button>
               </div>
             )}
+            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+              <span className="text-sm text-slate-600">{'\u66f4\u591a\u8bbe\u7f6e'}</span>
+              <Switch checked={editDetailOpen} onChange={(value) => setEditDetailOpen(value)} />
+            </div>
+            {editDetailOpen && (
+              <div className="space-y-3">
+                <TextArea
+                  placeholder="\u4efb\u52a1\u63cf\u8ff0\uff08\u53ef\u9009\uff09"
+                  value={editingDescription}
+                  onChange={setEditingDescription}
+                  rows={3}
+                  showCount
+                  maxLength={200}
+                />
+                <Input
+                  placeholder="\u622a\u6b62\u65f6\u95f4\uff08HH:mm\uff09"
+                  value={editingDueTime}
+                  onChange={setEditingDueTime}
+                  clearable
+                />
+                <div className="space-y-2">
+                  <span className="text-sm text-slate-600">{'\u4f18\u5148\u7ea7'}</span>
+                  <Selector
+                    options={PRIORITY_OPTIONS}
+                    value={editingPriority != null ? [editingPriority] : []}
+                    onChange={(val) => setEditingPriority(val[0] ?? null)}
+                  />
+                </div>
+                <Input
+                  placeholder="\u5206\u7c7b\uff08\u53ef\u9009\uff09"
+                  value={editingCategory}
+                  onChange={setEditingCategory}
+                  clearable
+                />
+                <Input
+                  placeholder="\u6807\u7b7e\uff08\u9017\u53f7\u5206\u9694\uff09"
+                  value={editingLabels}
+                  onChange={setEditingLabels}
+                  clearable
+                />
+                <div className="space-y-2">
+                  <span className="text-sm text-slate-600">{'\u91cd\u590d'}</span>
+                  <Selector
+                    options={REPEAT_OPTIONS}
+                    value={[editingRepeatType]}
+                    onChange={(val) => {
+                      const next = val[0] ?? 'none'
+                      setEditingRepeatType(next)
+                      if (next !== 'weekly') {
+                        setEditingRepeatDays([])
+                      }
+                    }}
+                  />
+                </div>
+                {editingRepeatType === 'weekly' && (
+                  <Selector
+                    options={WEEKDAY_OPTIONS}
+                    value={editingRepeatDays}
+                    multiple
+                    onChange={(val) => setEditingRepeatDays(val)}
+                  />
+                )}
+                <Input
+                  placeholder="\u63d0\u9192\u65f6\u95f4\uff08HH:mm\uff0c\u9017\u53f7\u5206\u9694\uff09"
+                  value={editingReminderTimes}
+                  onChange={setEditingReminderTimes}
+                  clearable
+                />
+              </div>
+            )}
           </div>
         }
       />
@@ -1287,7 +2353,10 @@ function Today({ user, syncTick }) {
         title="新增任务"
         closeOnMaskClick={!savingTask}
         closeOnAction={false}
-        onClose={() => setTaskOpen(false)}
+        onClose={() => {
+          setTaskOpen(false)
+          setTaskDetailOpen(false)
+        }}
         actions={[
           { key: 'cancel', text: '取消' },
           {
@@ -1302,6 +2371,7 @@ function Today({ user, syncTick }) {
             handleCreateTask()
           } else {
             setTaskOpen(false)
+            setTaskDetailOpen(false)
           }
         }}
         content={
@@ -1333,6 +2403,76 @@ function Today({ user, syncTick }) {
                 >
                   清除日期
                 </Button>
+              </div>
+            )}
+            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+              <span className="text-sm text-slate-600">{'\u66f4\u591a\u8bbe\u7f6e'}</span>
+              <Switch checked={taskDetailOpen} onChange={(value) => setTaskDetailOpen(value)} />
+            </div>
+            {taskDetailOpen && (
+              <div className="space-y-3">
+                <TextArea
+                  placeholder="\u4efb\u52a1\u63cf\u8ff0\uff08\u53ef\u9009\uff09"
+                  value={taskDescription}
+                  onChange={setTaskDescription}
+                  rows={3}
+                  showCount
+                  maxLength={200}
+                />
+                <Input
+                  placeholder="\u622a\u6b62\u65f6\u95f4\uff08HH:mm\uff09"
+                  value={taskDueTime}
+                  onChange={setTaskDueTime}
+                  clearable
+                />
+                <div className="space-y-2">
+                  <span className="text-sm text-slate-600">{'\u4f18\u5148\u7ea7'}</span>
+                  <Selector
+                    options={PRIORITY_OPTIONS}
+                    value={taskPriority != null ? [taskPriority] : []}
+                    onChange={(val) => setTaskPriority(val[0] ?? null)}
+                  />
+                </div>
+                <Input
+                  placeholder="\u5206\u7c7b\uff08\u53ef\u9009\uff09"
+                  value={taskCategory}
+                  onChange={setTaskCategory}
+                  clearable
+                />
+                <Input
+                  placeholder="\u6807\u7b7e\uff08\u9017\u53f7\u5206\u9694\uff09"
+                  value={taskLabels}
+                  onChange={setTaskLabels}
+                  clearable
+                />
+                <div className="space-y-2">
+                  <span className="text-sm text-slate-600">{'\u91cd\u590d'}</span>
+                  <Selector
+                    options={REPEAT_OPTIONS}
+                    value={[taskRepeatType]}
+                    onChange={(val) => {
+                      const next = val[0] ?? 'none'
+                      setTaskRepeatType(next)
+                      if (next !== 'weekly') {
+                        setTaskRepeatDays([])
+                      }
+                    }}
+                  />
+                </div>
+                {taskRepeatType === 'weekly' && (
+                  <Selector
+                    options={WEEKDAY_OPTIONS}
+                    value={taskRepeatDays}
+                    multiple
+                    onChange={(val) => setTaskRepeatDays(val)}
+                  />
+                )}
+                <Input
+                  placeholder="\u63d0\u9192\u65f6\u95f4\uff08HH:mm\uff0c\u9017\u53f7\u5206\u9694\uff09"
+                  value={taskReminderTimes}
+                  onChange={setTaskReminderTimes}
+                  clearable
+                />
               </div>
             )}
           </div>

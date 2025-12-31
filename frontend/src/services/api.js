@@ -290,9 +290,21 @@ export async function getTasks(userId) {
   }
 }
 
-export async function createTask(userId, title, plannedDate = null) {
+export async function getTaskOccurrences(userId, start, end) {
+  const params = { userId }
+  if (start) params.start = start
+  if (end) params.end = end
+  const { data } = await api.get('/api/task-occurrences', { params })
+  return Array.isArray(data?.items) ? data.items : []
+}
+
+export async function createTask(userId, payload) {
+  const taskPayload =
+    payload && typeof payload === 'object'
+      ? payload
+      : { title: typeof payload === 'string' ? payload : '' }
   try {
-    const { data } = await api.post('/api/tasks', { userId, title, plannedDate })
+    const { data } = await api.post('/api/tasks', { userId, ...taskPayload })
     appendTaskCache(userId, data)
     return data
   } catch (error) {
@@ -301,13 +313,19 @@ export async function createTask(userId, title, plannedDate = null) {
     }
 
     const tempId = -Math.floor(Date.now() + Math.random() * 1000)
-    const offline = { id: tempId, userId, title, isDone: false, plannedDate, _offline: true }
+    const offline = {
+      id: tempId,
+      userId,
+      isDone: false,
+      ...taskPayload,
+      _offline: true,
+    }
 
     enqueueOp({
       id: opId(),
       type: 'task_create',
       userId,
-      payload: { tempId, title, plannedDate },
+      payload: { tempId, data: taskPayload },
       createdAt: Date.now(),
     })
 
@@ -393,6 +411,23 @@ export async function updateTask(userId, id, updates) {
   }
 }
 
+export async function updateTaskOccurrence(userId, taskId, occurrenceDate, updates) {
+  const normalizedTaskId = Number(taskId)
+  if (!Number.isFinite(normalizedTaskId) || normalizedTaskId <= 0) {
+    throw new Error('invalid task id')
+  }
+  if (!occurrenceDate || typeof occurrenceDate !== 'string') {
+    throw new Error('invalid occurrence date')
+  }
+  const { data } = await api.patch('/api/task-occurrences', {
+    userId,
+    taskId: normalizedTaskId,
+    occurrenceDate,
+    updates,
+  })
+  return data?.item ?? null
+}
+
 async function deleteTaskNetwork(userId, id) {
   await api.delete(`/api/tasks/${id}`, { params: { userId } })
 }
@@ -456,6 +491,21 @@ export async function deleteTask(userId, id) {
   }
 }
 
+export async function getPushPublicKey() {
+  const { data } = await api.get('/api/push/vapid-public-key')
+  return data?.publicKey || ''
+}
+
+export async function subscribePush(userId, subscription) {
+  const { data } = await api.post('/api/push/subscribe', { userId, subscription })
+  return data
+}
+
+export async function unsubscribePush(userId, endpoint) {
+  const { data } = await api.post('/api/push/unsubscribe', { userId, endpoint })
+  return data
+}
+
 export async function syncPendingOps(userId) {
   const ops = getPendingOps(userId).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
   if (ops.length === 0) {
@@ -489,14 +539,18 @@ export async function syncPendingOps(userId) {
       }
 
       if (op.type === 'task_create') {
-        const { tempId, title, plannedDate } = op.payload || {}
-        if (!Number.isFinite(tempId) || !title) {
+        const { tempId, title, plannedDate, data: payloadData } = op.payload || {}
+        const taskPayload =
+          payloadData && typeof payloadData === 'object'
+            ? payloadData
+            : { title, plannedDate }
+        if (!Number.isFinite(tempId) || !taskPayload?.title) {
           completedIds.push(op.id)
           failed += 1
           continue
         }
 
-        const { data } = await api.post('/api/tasks', { userId, title, plannedDate })
+        const { data } = await api.post('/api/tasks', { userId, ...taskPayload })
         replaceTaskInCache(userId, tempId, data)
         replaceTaskIdInOrder(userId, tempId, data.id)
         replaceQueuedTaskId(userId, tempId, data.id)
