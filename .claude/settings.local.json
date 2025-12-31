@@ -18,7 +18,10 @@
       "Bash(start ollama serve)",
       "Bash(git add:*)",
       "Bash(npm install:*)",
-      "Bash(pnpm install)"
+      "Bash(pnpm install)",
+      "Bash(npx prisma migrate dev:*)",
+      "Bash(npm run dev)",
+      "Bash(npx prisma generate)"
     ]
   }
 }

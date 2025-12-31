@@ -31,9 +31,12 @@ model StudyLog {
 }
 
 model Task {
-  id     Int     @id @default(autoincrement())
-  title  String
-  isDone Boolean @default(false)
-  userId Int
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          Int     @id @default(autoincrement())
+  title       String
+  isDone      Boolean @default(false)
+  plannedDate String? // 计划完成日期，格式 YYYY-MM-DD
+  userId      Int
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([plannedDate])
 }

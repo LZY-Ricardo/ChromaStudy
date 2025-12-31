@@ -2,6 +2,23 @@ const USER_KEY = 'chroma_user'
 const AI_KEY = 'chroma_ai'
 const AI_EVENT = 'chroma_ai_changed'
 
+function buildDefaultAiState() {
+  return {
+    version: 2,
+    activeProfileId: 'local',
+    profiles: [
+      {
+        id: 'local',
+        name: '本地 Ollama',
+        provider: 'ollama',
+        ollama: { host: 'http://localhost:11434', model: 'llama3' },
+        openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: '', presetId: '' },
+        health: null,
+      },
+    ],
+  }
+}
+
 function safeParse(raw) {
   try {
     return raw ? JSON.parse(raw) : null
@@ -108,7 +125,7 @@ export function loadAiState() {
     return null
   }
   const raw = safeParse(window.localStorage.getItem(AI_KEY))
-  if (!raw) return null
+  if (!raw) return buildDefaultAiState()
 
   const state = normalizeAiState(raw)
   if (state) return state
@@ -130,27 +147,17 @@ export function loadAiState() {
     }
   }
 
-  return null
+  return buildDefaultAiState()
 }
 
 export function loadAiConfig() {
   if (typeof window === 'undefined') {
     return null
   }
-  const raw = safeParse(window.localStorage.getItem(AI_KEY))
-  if (!raw) return null
-
-  const state = normalizeAiState(raw)
-  if (state) {
-    const active = state.profiles.find((p) => p.id === state.activeProfileId) ?? state.profiles[0]
-    return active ? normalizeAiConfig(active) : null
-  }
-
-  if (typeof raw === 'object' && raw) {
-    return normalizeAiConfig(raw)
-  }
-
-  return null
+  const state = loadAiState()
+  if (!state) return null
+  const active = state.profiles.find((p) => p.id === state.activeProfileId) ?? state.profiles[0]
+  return active ? normalizeAiConfig(active) : null
 }
 
 export function saveAiState(state) {

@@ -11,11 +11,12 @@ import {
   Tag,
   TextArea,
   Toast,
+  DatePicker,
 } from 'antd-mobile'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GripVertical, PencilLine, Trash2, Share2 } from 'lucide-react'
+import { GripVertical, PencilLine, Trash2, Share2, Calendar, AlertCircle, Clock } from 'lucide-react'
 import {
   checkin,
   createTask,
@@ -76,6 +77,56 @@ function SortableTaskItem({ task, disabled, onToggle }) {
   )
 }
 
+// 任务日期分组辅助函数
+function groupTasksByDate(tasks, todayKey) {
+  const groups = {
+    overdue: [], // 逾期任务（计划日期早于今天且未完成）
+    today: [], // 今天任务
+    tomorrow: [], // 明天任务
+    thisWeek: [], // 本周剩余（后天到周日）
+    future: [], // 未来（下周及以后）
+    noDate: [], // 无日期
+  }
+
+  const today = dayjs(todayKey)
+  const tomorrow = today.add(1, 'day')
+  const weekEnd = today.endOf('week') // 周日
+
+  for (const task of tasks) {
+    if (task.isDone) continue // 已完成任务单独处理
+
+    if (!task.plannedDate) {
+      groups.noDate.push(task)
+      continue
+    }
+
+    const plannedDate = dayjs(task.plannedDate)
+    if (plannedDate.isBefore(today, 'day')) {
+      groups.overdue.push(task)
+    } else if (plannedDate.isSame(today, 'day')) {
+      groups.today.push(task)
+    } else if (plannedDate.isSame(tomorrow, 'day')) {
+      groups.tomorrow.push(task)
+    } else if (plannedDate.isBefore(weekEnd.add(1, 'day'), 'day')) {
+      groups.thisWeek.push(task)
+    } else {
+      groups.future.push(task)
+    }
+  }
+
+  return groups
+}
+
+// 日期分组标题配置
+const DATE_GROUP_LABELS = {
+  overdue: { label: '逾期', color: 'danger', icon: AlertCircle },
+  today: { label: '今天', color: 'primary', icon: Clock },
+  tomorrow: { label: '明天', color: 'default', icon: Calendar },
+  thisWeek: { label: '本周晚些时候', color: 'default', icon: Calendar },
+  future: { label: '未来', color: 'default', icon: Calendar },
+  noDate: { label: '无日期', color: 'default', icon: null },
+}
+
 function Today({ user, syncTick }) {
   const navigate = useNavigate()
   const todayLabel = dayjs().format('dddd, MMM D')
@@ -88,14 +139,20 @@ function Today({ user, syncTick }) {
   const [taskOpen, setTaskOpen] = useState(false)
   const [manageTasks, setManageTasks] = useState(false)
   const [showDoneTasks, setShowDoneTasks] = useState(false)
+  const [taskViewMode, setTaskViewMode] = useState('focus') // 'focus' | 'all'
   const [duration, setDuration] = useState('')
   const [content, setContent] = useState('')
   const [taskTitle, setTaskTitle] = useState('')
+  const [taskPlannedDate, setTaskPlannedDate] = useState(null)
+  const [showDatePicker, setShowDatePicker] = useState(false)
   const [savingCheckin, setSavingCheckin] = useState(false)
   const [savingTask, setSavingTask] = useState(false)
   const [updatingTaskId, setUpdatingTaskId] = useState(null)
   const [editingTask, setEditingTask] = useState(null)
   const [editingTitle, setEditingTitle] = useState('')
+  const [editingPlannedDate, setEditingPlannedDate] = useState(null)
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false)
+  const [showSuggestDialog, setShowSuggestDialog] = useState(false)
   const feedbackPollingRef = useRef(false)
   const [aiDecomposeOpen, setAiDecomposeOpen] = useState(false)
   const [aiGoal, setAiGoal] = useState('')
@@ -111,6 +168,27 @@ function Today({ user, syncTick }) {
     [logs, todayKey]
   )
   const completedCount = tasks.filter((task) => task.isDone).length
+
+  // 按日期分组任务
+  const taskGroups = useMemo(() => {
+    const grouped = groupTasksByDate(tasks, todayKey)
+    // 对每个分组内的任务按排序顺序排列
+    return Object.fromEntries(
+      Object.entries(grouped).map(([key, tasks]) => [key, sortByOrder(tasks, taskOrder)])
+    )
+  }, [tasks, taskOrder, todayKey])
+
+  // 今日专注模式：只显示逾期、今天、无日期的任务
+  const focusModeGroups = useMemo(() => {
+    return {
+      overdue: taskGroups.overdue,
+      today: taskGroups.today,
+      noDate: taskGroups.noDate,
+    }
+  }, [taskGroups])
+
+  // 当前显示的分组
+  const displayedGroups = taskViewMode === 'focus' ? focusModeGroups : taskGroups
 
   const weeklyGoalMinutes = loadWeeklyGoal(user?.id)
   const weekRange = useMemo(() => {
@@ -313,7 +391,7 @@ function Today({ user, syncTick }) {
     }
     setSavingTask(true)
     try {
-      const task = await createTask(user.id, title)
+      const task = await createTask(user.id, title, taskPlannedDate)
       setTasks((prev) => [...prev, task])
       setTaskOrder((prev) => {
         const next = [...prev.filter((id) => id !== task.id), task.id]
@@ -322,6 +400,7 @@ function Today({ user, syncTick }) {
       })
       setTaskOpen(false)
       setTaskTitle('')
+      setTaskPlannedDate(null)
       Toast.show({ content: '任务已添加' })
     } catch {
       Toast.show({ content: '新增任务失败' })
@@ -413,6 +492,7 @@ function Today({ user, syncTick }) {
   const handleEditTask = (task) => {
     setEditingTask(task)
     setEditingTitle(task.title)
+    setEditingPlannedDate(task.plannedDate || null)
   }
 
   const handleSaveEdit = async () => {
@@ -423,10 +503,15 @@ function Today({ user, syncTick }) {
     }
     setUpdatingTaskId(editingTask.id)
     try {
-      const updated = await updateTask(user.id, editingTask.id, { title })
+      const updates = { title }
+      if (editingPlannedDate !== editingTask.plannedDate) {
+        updates.plannedDate = editingPlannedDate
+      }
+      const updated = await updateTask(user.id, editingTask.id, updates)
       setTasks((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
       setEditingTask(null)
       setEditingTitle('')
+      setEditingPlannedDate(null)
       Toast.show({ content: '任务已更新' })
     } catch {
       Toast.show({ content: '更新任务失败' })
@@ -552,6 +637,33 @@ function Today({ user, syncTick }) {
   const manualInput = () => {
     setShowFillPrompt(false)
     setCheckinOpen(true)
+  }
+
+  // 智能建议：将无日期任务添加到今天
+  const handleSuggestToDate = async () => {
+    const noDateTasks = tasks.filter((t) => !t.isDone && !t.plannedDate)
+    if (noDateTasks.length === 0) {
+      Toast.show({ content: '暂无无日期任务' })
+      return
+    }
+
+    setSavingTask(true)
+    try {
+      const updatePromises = noDateTasks.map((task) =>
+        updateTask(user.id, task.id, { plannedDate: todayKey })
+      )
+      const updated = await Promise.all(updatePromises)
+      setTasks((prev) => {
+        const updatedMap = new Map(updated.map((t) => [t.id, t]))
+        return prev.map((item) => updatedMap.get(item.id) || item)
+      })
+      setShowSuggestDialog(false)
+      Toast.show({ content: `已将 ${noDateTasks.length} 个任务添加到今天` })
+    } catch {
+      Toast.show({ content: '操作失败' })
+    } finally {
+      setSavingTask(false)
+    }
   }
 
   return (
@@ -694,9 +806,24 @@ function Today({ user, syncTick }) {
       </Card>
 
       <Card
-        title="Task Radar"
+        title="任务列表"
         extra={
           <div className="flex items-center gap-2">
+            <Button
+              size="small"
+              fill={taskViewMode === 'focus' ? 'solid' : 'outline'}
+              color="primary"
+              onClick={() => setTaskViewMode('focus')}
+            >
+              今日专注
+            </Button>
+            <Button
+              size="small"
+              fill={taskViewMode === 'all' ? 'solid' : 'outline'}
+              onClick={() => setTaskViewMode('all')}
+            >
+              全部任务
+            </Button>
             <Button
               size="small"
               fill={manageTasks ? 'solid' : 'outline'}
@@ -720,78 +847,136 @@ function Today({ user, syncTick }) {
           <p className="text-sm text-slate-500">还没有任务，先创建一个吧。</p>
         ) : (
           <>
-            {!manageTasks ? (
-              <List>
-                {activeTasks.map((task) => (
-                  <SwipeAction
-                    key={task.id}
-                    closeOnAction
-                    rightActions={[
-                      {
-                        key: 'edit',
-                        text: (
-                          <span className="inline-flex items-center gap-1">
-                            <PencilLine size={16} />
-                            编辑
-                          </span>
-                        ),
-                        color: 'primary',
-                      },
-                      {
-                        key: 'delete',
-                        text: (
-                          <span className="inline-flex items-center gap-1">
-                            <Trash2 size={16} />
-                            删除
-                          </span>
-                        ),
-                        color: 'danger',
-                      },
-                    ]}
-                    onAction={(action) => {
-                      if (action.key === 'edit') {
-                        handleEditTask(task)
-                      }
-                      if (action.key === 'delete') {
-                        handleDeleteTask(task)
-                      }
-                    }}
-                  >
-                    <List.Item
-                      extra={
-                        <Switch
-                          checked={task.isDone}
-                          disabled={updatingTaskId === task.id}
-                          onChange={(value) => handleToggleTask(task, value)}
-                        />
-                      }
-                    >
-                      <span className="text-slate-900">{task.title}</span>
-                    </List.Item>
-                  </SwipeAction>
-                ))}
-              </List>
-            ) : (
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <SortableContext items={activeTasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
+            {/* 渲染按日期分组的任务 */}
+            {Object.entries(displayedGroups).map(([groupKey, groupTasks]) => {
+              if (groupTasks.length === 0) return null
+              const groupConfig = DATE_GROUP_LABELS[groupKey]
+              const Icon = groupConfig.icon
+
+              return (
+                <div key={groupKey} className="mb-4 last:mb-0">
+                  <div className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.3em] ${
+                    groupKey === 'overdue' ? 'text-red-500' :
+                    groupKey === 'today' ? 'text-emerald-600' :
+                    'text-slate-400'
+                  }`}>
+                    {Icon && <Icon size={12} />}
+                    <span>{groupConfig.label}</span>
+                    <span className="ml-1 text-slate-400">({groupTasks.length})</span>
+                  </div>
                   <List>
-                    {activeTasks.map((task) => (
-                      <SortableTaskItem
+                    {groupTasks.map((task) => (
+                      <SwipeAction
                         key={task.id}
-                        task={task}
-                        disabled={updatingTaskId === task.id}
-                        onToggle={handleToggleTask}
-                      />
+                        closeOnAction
+                        rightActions={[
+                          {
+                            key: 'edit',
+                            text: (
+                              <span className="inline-flex items-center gap-1">
+                                <PencilLine size={16} />
+                                编辑
+                              </span>
+                            ),
+                            color: 'primary',
+                          },
+                          {
+                            key: 'delete',
+                            text: (
+                              <span className="inline-flex items-center gap-1">
+                                <Trash2 size={16} />
+                                删除
+                              </span>
+                            ),
+                            color: 'danger',
+                          },
+                        ]}
+                        onAction={(action) => {
+                          if (action.key === 'edit') {
+                            handleEditTask(task)
+                          }
+                          if (action.key === 'delete') {
+                            handleDeleteTask(task)
+                          }
+                        }}
+                      >
+                        <List.Item
+                          extra={
+                            <Switch
+                              checked={task.isDone}
+                              disabled={updatingTaskId === task.id}
+                              onChange={(value) => handleToggleTask(task, value)}
+                            />
+                          }
+                        >
+                          <span className="text-slate-900">{task.title}</span>
+                        </List.Item>
+                      </SwipeAction>
                     ))}
                   </List>
-                </SortableContext>
+                </div>
+              )
+            })}
+
+            {/* 智能建议：无日期任务提示 */}
+            {taskViewMode === 'all' && displayedGroups.noDate.length > 0 && !manageTasks && (
+              <div className="mt-3 rounded-xl bg-amber-50 p-3">
+                <p className="mb-2 text-sm text-amber-800">
+                  📌 有 {displayedGroups.noDate.length} 个任务未设置计划日期
+                </p>
+                <Button
+                  size="small"
+                  color="warning"
+                  fill="outline"
+                  onClick={() => setShowSuggestDialog(true)}
+                >
+                  智能分配到今天
+                </Button>
+              </div>
+            )}
+
+            {/* 管理模式：拖拽排序（仅对当前显示的分组生效） */}
+            {manageTasks && (
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <div className="space-y-3">
+                  {Object.entries(displayedGroups).map(([groupKey, groupTasks]) => {
+                    if (groupTasks.length === 0) return null
+                    const groupConfig = DATE_GROUP_LABELS[groupKey]
+                    const Icon = groupConfig.icon
+
+                    return (
+                      <div key={groupKey}>
+                        <div className={`mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.3em] ${
+                          groupKey === 'overdue' ? 'text-red-500' :
+                          groupKey === 'today' ? 'text-emerald-600' :
+                          'text-slate-400'
+                        }`}>
+                          {Icon && <Icon size={12} />}
+                          <span>{groupConfig.label}</span>
+                        </div>
+                        <SortableContext items={groupTasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
+                          <List>
+                            {groupTasks.map((task) => (
+                              <SortableTaskItem
+                                key={task.id}
+                                task={task}
+                                disabled={updatingTaskId === task.id}
+                                onToggle={handleToggleTask}
+                              />
+                            ))}
+                          </List>
+                        </SortableContext>
+                      </div>
+                    )
+                  })}
+                </div>
               </DndContext>
             )}
 
             {showDoneTasks && doneTasks.length > 0 ? (
               <div className="mt-3">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Completed
+                  已完成
                 </p>
                 <List>
                   {doneTasks.map((task) => (
@@ -1031,6 +1216,7 @@ function Today({ user, syncTick }) {
           }
           setEditingTask(null)
           setEditingTitle('')
+          setEditingPlannedDate(null)
         }}
         actions={[
           { key: 'cancel', text: '取消' },
@@ -1047,16 +1233,53 @@ function Today({ user, syncTick }) {
           } else {
             setEditingTask(null)
             setEditingTitle('')
+            setEditingPlannedDate(null)
           }
         }}
         content={
-          <Input
-            placeholder="任务内容"
-            value={editingTitle}
-            onChange={setEditingTitle}
-            clearable
-          />
+          <div className="space-y-3">
+            <Input
+              placeholder="任务内容"
+              value={editingTitle}
+              onChange={setEditingTitle}
+              clearable
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-600">计划日期</span>
+              <Button
+                size="small"
+                fill="outline"
+                onClick={() => setShowEditDatePicker(true)}
+              >
+                {editingPlannedDate ? dayjs(editingPlannedDate).format('MM月DD日') : '选择日期'}
+              </Button>
+            </div>
+            {editingPlannedDate && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">已选择</span>
+                <Button
+                  size="mini"
+                  fill="none"
+                  color="danger"
+                  onClick={() => setEditingPlannedDate(null)}
+                >
+                  清除日期
+                </Button>
+              </div>
+            )}
+          </div>
         }
+      />
+
+      {/* 编辑任务日期选择器 */}
+      <DatePicker
+        visible={showEditDatePicker}
+        onClose={() => setShowEditDatePicker(false)}
+        max={dayjs().add(90, 'day').toDate()}
+        onConfirm={(date) => {
+          setEditingPlannedDate(dayjs(date).format('YYYY-MM-DD'))
+          setShowEditDatePicker(false)
+        }}
       />
 
       <Dialog
@@ -1082,12 +1305,93 @@ function Today({ user, syncTick }) {
           }
         }}
         content={
-          <Input
-            placeholder="例如：复盘算法笔记"
-            value={taskTitle}
-            onChange={setTaskTitle}
-            clearable
-          />
+          <div className="space-y-3">
+            <Input
+              placeholder="例如：复盘算法笔记"
+              value={taskTitle}
+              onChange={setTaskTitle}
+              clearable
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-600">计划日期</span>
+              <Button
+                size="small"
+                fill="outline"
+                onClick={() => setShowDatePicker(true)}
+              >
+                {taskPlannedDate ? dayjs(taskPlannedDate).format('MM月DD日') : '选择日期'}
+              </Button>
+            </div>
+            {taskPlannedDate && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">已选择</span>
+                <Button
+                  size="mini"
+                  fill="none"
+                  color="danger"
+                  onClick={() => setTaskPlannedDate(null)}
+                >
+                  清除日期
+                </Button>
+              </div>
+            )}
+          </div>
+        }
+      />
+
+      {/* 日期选择器 */}
+      <DatePicker
+        visible={showDatePicker}
+        onClose={() => setShowDatePicker(false)}
+        max={dayjs().add(90, 'day').toDate()}
+        onConfirm={(date) => {
+          setTaskPlannedDate(dayjs(date).format('YYYY-MM-DD'))
+          setShowDatePicker(false)
+        }}
+      />
+
+      {/* 智能建议对话框 */}
+      <Dialog
+        visible={showSuggestDialog}
+        title="智能分配任务"
+        closeOnMaskClick={!savingTask}
+        closeOnAction={false}
+        onClose={() => setShowSuggestDialog(false)}
+        actions={[
+          { key: 'cancel', text: '取消' },
+          {
+            key: 'confirm',
+            text: savingTask ? '处理中...' : '确认添加到今天',
+            bold: true,
+            disabled: savingTask,
+            primary: true,
+          },
+        ]}
+        onAction={(action) => {
+          if (action.key === 'confirm') {
+            handleSuggestToDate()
+          } else {
+            setShowSuggestDialog(false)
+          }
+        }}
+        content={
+          <div className="space-y-3">
+            <p className="text-sm text-slate-700">
+              📌 检测到有 <span className="font-semibold text-amber-600">
+                {tasks.filter((t) => !t.isDone && !t.plannedDate).length}
+              </span> 个任务未设置计划日期
+            </p>
+            <p className="text-xs text-slate-500">
+              是否将这些任务全部设置计划日期为今天（{dayjs().format('MM月DD日')}）？
+            </p>
+            <div className="max-h-32 overflow-y-auto rounded-xl bg-slate-50 p-2">
+              {tasks.filter((t) => !t.isDone && !t.plannedDate).map((task) => (
+                <div key={task.id} className="mb-1 truncate text-xs text-slate-600">
+                  • {task.title}
+                </div>
+              ))}
+            </div>
+          </div>
         }
       />
 

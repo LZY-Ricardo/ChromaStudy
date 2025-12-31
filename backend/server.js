@@ -60,10 +60,94 @@ function validateOpenAiConfig(config) {
   return "";
 }
 
+function validateOpenAiAuth(config) {
+  if (!config.baseUrl || !config.apiKey) {
+    return "openai config requires baseUrl/apiKey";
+  }
+  return "";
+}
+
 function clampErrorText(text, max = 300) {
   const normalized = String(text || "").replace(/\s+/g, " ").trim();
   if (normalized.length <= max) return normalized;
   return normalized.slice(0, max);
+}
+
+const OPENAI_MODELS_CACHE_TTL_MS = 10 * 60 * 1000;
+const openAiModelsCache = new Map();
+const openAiModelsInflight = new Map();
+
+function extractOpenAiModelIds(payload) {
+  if (Array.isArray(payload?.data)) {
+    return payload.data
+      .map((item) => (typeof item?.id === "string" ? item.id.trim() : ""))
+      .filter(Boolean);
+  }
+  if (Array.isArray(payload?.models)) {
+    return payload.models
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
+  }
+  return [];
+}
+
+async function fetchOpenAiModelsFromProvider(aiConfig) {
+  const error = validateOpenAiAuth(aiConfig);
+  if (error) {
+    throw new Error(error);
+  }
+
+  const response = await fetch(`${aiConfig.baseUrl}/models`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${aiConfig.apiKey}`,
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`openai request failed: ${response.status} ${clampErrorText(body)}`);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  const ids = extractOpenAiModelIds(data);
+  return Array.from(new Set(ids)).sort((a, b) => a.localeCompare(b));
+}
+
+async function getOpenAiModelsCached(aiConfig, { refresh = false } = {}) {
+  const key = aiConfig.baseUrl;
+  if (!key) {
+    throw new Error("openai config requires baseUrl/apiKey");
+  }
+
+  if (refresh) {
+    openAiModelsCache.delete(key);
+  }
+
+  const now = Date.now();
+  const cached = openAiModelsCache.get(key);
+  if (cached && now - cached.at < OPENAI_MODELS_CACHE_TTL_MS && Array.isArray(cached.models)) {
+    return cached.models;
+  }
+
+  const inflight = openAiModelsInflight.get(key);
+  if (inflight) {
+    return inflight;
+  }
+
+  const promise = fetchOpenAiModelsFromProvider(aiConfig)
+    .then((models) => {
+      openAiModelsCache.set(key, { at: Date.now(), models });
+      openAiModelsInflight.delete(key);
+      return models;
+    })
+    .catch((error) => {
+      openAiModelsInflight.delete(key);
+      throw error;
+    });
+
+  openAiModelsInflight.set(key, promise);
+  return promise;
 }
 
 async function pingAi(aiConfig) {
@@ -598,7 +682,7 @@ app.get(
 app.post(
   "/api/tasks",
   asyncHandler(async (req, res) => {
-    const { userId, title } = req.body || {};
+    const { userId, title, plannedDate } = req.body || {};
     const normalizedUserId = Number(userId);
 
     if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
@@ -609,10 +693,21 @@ app.post(
       return res.status(400).json({ error: "title is required" });
     }
 
+    // 验证 plannedDate 格式（如果提供）
+    let normalizedPlannedDate = null;
+    if (plannedDate) {
+      const dateStr = String(plannedDate).trim();
+      if (dateStr && !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        return res.status(400).json({ error: "plannedDate must be YYYY-MM-DD format" });
+      }
+      normalizedPlannedDate = dateStr || null;
+    }
+
     const task = await prisma.task.create({
       data: {
         userId: normalizedUserId,
         title,
+        plannedDate: normalizedPlannedDate,
       },
     });
 
@@ -624,7 +719,7 @@ app.patch(
   "/api/tasks/:id",
   asyncHandler(async (req, res) => {
     const taskId = Number(req.params.id);
-    const { title, isDone } = req.body || {};
+    const { title, isDone, plannedDate } = req.body || {};
 
     if (!Number.isInteger(taskId) || taskId <= 0) {
       return res.status(400).json({ error: "id must be a positive integer" });
@@ -636,6 +731,17 @@ app.patch(
     }
     if (typeof isDone === "boolean") {
       updates.isDone = isDone;
+    }
+    if (plannedDate !== undefined) {
+      if (plannedDate === null || plannedDate === "") {
+        updates.plannedDate = null;
+      } else {
+        const dateStr = String(plannedDate).trim();
+        if (dateStr && !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          return res.status(400).json({ error: "plannedDate must be YYYY-MM-DD format" });
+        }
+        updates.plannedDate = dateStr || null;
+      }
     }
 
     if (Object.keys(updates).length === 0) {
@@ -685,6 +791,45 @@ app.post(
       return res.status(502).json({ error: result.error || "ping failed" });
     }
     return res.json(result);
+  })
+);
+
+app.post(
+  "/api/ai/models",
+  asyncHandler(async (req, res) => {
+    const { ai, q, limit, refresh } = req.body || {};
+    const aiConfig = resolveAiConfig(ai);
+    if (aiConfig.provider !== "openai") {
+      return res.status(400).json({ error: "provider must be openai" });
+    }
+
+    const error = validateOpenAiAuth(aiConfig);
+    if (error) {
+      return res.status(400).json({ error });
+    }
+
+    const query = typeof q === "string" ? q.trim().toLowerCase() : "";
+    const parsedLimit = Number.parseInt(String(limit ?? ""), 10);
+    const take = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 200) : 80;
+    const shouldRefresh = refresh === true;
+
+    let models;
+    try {
+      models = await getOpenAiModelsCached(aiConfig, { refresh: shouldRefresh });
+    } catch (err) {
+      return res.status(502).json({ error: String(err?.message || "models request failed") });
+    }
+
+    const filtered = query
+      ? models.filter((id) => String(id).toLowerCase().includes(query))
+      : models;
+
+    const cachedAt = openAiModelsCache.get(aiConfig.baseUrl)?.at || 0;
+    return res.json({
+      models: filtered.slice(0, take),
+      total: filtered.length,
+      cachedAt,
+    });
   })
 );
 
@@ -1020,6 +1165,7 @@ app.post("/api/chat", (req, res) => {
   console.log("[CHAT] Request received");
   const { messages, ai } = req.body || {};
   console.log("[CHAT] Messages count:", messages?.length);
+  console.log("[CHAT] AI config:", JSON.stringify(ai));
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: "messages is required" });
@@ -1054,9 +1200,11 @@ app.post("/api/chat", (req, res) => {
   };
 
   const aiConfig = resolveAiConfig(ai);
+  console.log("[CHAT] Resolved AI config:", JSON.stringify(aiConfig));
   if (aiConfig.provider === "openai") {
     const error = validateOpenAiConfig(aiConfig);
     if (error) {
+      console.error("[CHAT] OpenAI config error:", error);
       return res.status(400).json({ error });
     }
   }

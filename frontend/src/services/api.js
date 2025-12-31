@@ -290,9 +290,9 @@ export async function getTasks(userId) {
   }
 }
 
-export async function createTask(userId, title) {
+export async function createTask(userId, title, plannedDate = null) {
   try {
-    const { data } = await api.post('/api/tasks', { userId, title })
+    const { data } = await api.post('/api/tasks', { userId, title, plannedDate })
     appendTaskCache(userId, data)
     return data
   } catch (error) {
@@ -301,13 +301,13 @@ export async function createTask(userId, title) {
     }
 
     const tempId = -Math.floor(Date.now() + Math.random() * 1000)
-    const offline = { id: tempId, userId, title, isDone: false, _offline: true }
+    const offline = { id: tempId, userId, title, isDone: false, plannedDate, _offline: true }
 
     enqueueOp({
       id: opId(),
       type: 'task_create',
       userId,
-      payload: { tempId, title },
+      payload: { tempId, title, plannedDate },
       createdAt: Date.now(),
     })
 
@@ -489,14 +489,14 @@ export async function syncPendingOps(userId) {
       }
 
       if (op.type === 'task_create') {
-        const { tempId, title } = op.payload || {}
+        const { tempId, title, plannedDate } = op.payload || {}
         if (!Number.isFinite(tempId) || !title) {
           completedIds.push(op.id)
           failed += 1
           continue
         }
 
-        const { data } = await api.post('/api/tasks', { userId, title })
+        const { data } = await api.post('/api/tasks', { userId, title, plannedDate })
         replaceTaskInCache(userId, tempId, data)
         replaceTaskIdInOrder(userId, tempId, data.id)
         replaceQueuedTaskId(userId, tempId, data.id)
@@ -586,6 +586,26 @@ export async function generateFlashcards(userId, date, count, ai) {
 export async function pingAi(ai) {
   const { data } = await api.post('/api/ai/ping', { ai })
   return data
+}
+
+export async function listAiModels(ai, query, limit, refresh) {
+  const payload = { ai }
+  const q = typeof query === 'string' ? query.trim() : ''
+  if (q) {
+    payload.q = q
+  }
+  if (Number.isFinite(limit) && limit > 0) {
+    payload.limit = limit
+  }
+  if (refresh === true) {
+    payload.refresh = true
+  }
+  const { data } = await api.post('/api/ai/models', payload)
+  return {
+    models: Array.isArray(data?.models) ? data.models : [],
+    total: Number(data?.total) || 0,
+    cachedAt: Number(data?.cachedAt) || 0,
+  }
 }
 
 export async function generateReport(userId, payload) {

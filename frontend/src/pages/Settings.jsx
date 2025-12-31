@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { ActionSheet, Button, Card, Dialog, Input, List, Selector, Switch, TextArea, Toast } from 'antd-mobile'
-import { pingAi } from '../services/api.js'
+import { listAiModels, pingAi } from '../services/api.js'
 import {
   deleteAiProfile,
   loadAiConfig,
@@ -66,6 +66,8 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     stored?.openai?.presetId ??
     detectOpenAiCompatPresetId(stored?.openai?.baseUrl ?? defaultAiConfig.openai.baseUrl)
   const fileInputRef = useRef(null)
+  const openaiModelSearchTimerRef = useRef(null)
+  const openaiModelRequestIdRef = useRef(0)
   const [, bumpLocalRender] = useState(0)
   const [pendingOpen, setPendingOpen] = useState(false)
   const [detailOp, setDetailOp] = useState(null)
@@ -94,6 +96,13 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     stored?.openai?.model ?? defaultAiConfig.openai.model
   )
   const [openaiApiKey, setOpenaiApiKey] = useState(stored?.openai?.apiKey ?? '')
+  const [openaiModelPickerOpen, setOpenaiModelPickerOpen] = useState(false)
+  const [openaiModelQuery, setOpenaiModelQuery] = useState('')
+  const [openaiModelCandidates, setOpenaiModelCandidates] = useState([])
+  const [openaiModelTotal, setOpenaiModelTotal] = useState(0)
+  const [openaiModelCachedAt, setOpenaiModelCachedAt] = useState(0)
+  const [openaiModelLoading, setOpenaiModelLoading] = useState(false)
+  const [openaiModelError, setOpenaiModelError] = useState('')
   const openaiPreset = getOpenAiCompatPreset(openaiPresetId)
   const [weeklyGoal, setWeeklyGoal] = useState(() => loadWeeklyGoal(user?.id))
   const pendingCount = getPendingOpsCount(user?.id)
@@ -1231,6 +1240,99 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     setOpenaiAdvanced(false)
   }
 
+  const closeOpenaiModelPicker = () => {
+    if (openaiModelLoading) return
+    if (openaiModelSearchTimerRef.current) {
+      window.clearTimeout(openaiModelSearchTimerRef.current)
+      openaiModelSearchTimerRef.current = null
+    }
+    openaiModelRequestIdRef.current += 1
+    setOpenaiModelPickerOpen(false)
+  }
+
+  const fetchOpenaiModels = async ({ query, refresh } = {}) => {
+    const config = buildAiDraftConfig()
+    if (config.provider !== 'openai') {
+      Toast.show({ content: '当前不是云端模式' })
+      return
+    }
+
+    if (!config.openai.baseUrl || !config.openai.apiKey) {
+      const message = '请先填写 Base URL / API Key'
+      setOpenaiModelError(message)
+      setOpenaiModelCandidates([])
+      setOpenaiModelTotal(0)
+      Toast.show({ content: message })
+      return
+    }
+
+    const requestId = (openaiModelRequestIdRef.current += 1)
+
+    setOpenaiModelLoading(true)
+    setOpenaiModelError('')
+    try {
+      const result = await listAiModels(config, query, 80, refresh)
+      if (requestId !== openaiModelRequestIdRef.current) {
+        return
+      }
+      setOpenaiModelCandidates(result.models)
+      setOpenaiModelTotal(result.total)
+      setOpenaiModelCachedAt(result.cachedAt)
+    } catch (error) {
+      if (requestId !== openaiModelRequestIdRef.current) {
+        return
+      }
+      const message =
+        error?.response?.data?.error ?? error?.message ?? '获取模型列表失败，请检查网络与 Key'
+      setOpenaiModelError(String(message))
+      setOpenaiModelCandidates([])
+      setOpenaiModelTotal(0)
+    } finally {
+      if (requestId === openaiModelRequestIdRef.current) {
+        setOpenaiModelLoading(false)
+      }
+    }
+  }
+
+  const scheduleOpenaiModelSearch = (value) => {
+    if (!openaiModelPickerOpen) return
+    if (openaiModelSearchTimerRef.current) {
+      window.clearTimeout(openaiModelSearchTimerRef.current)
+    }
+    openaiModelSearchTimerRef.current = window.setTimeout(() => {
+      fetchOpenaiModels({ query: value, refresh: false })
+    }, 250)
+  }
+
+  const openOpenaiModelPicker = async () => {
+    if (provider !== 'openai') {
+      Toast.show({ content: '请先切换到云端（OpenAI兼容）' })
+      return
+    }
+
+    if (openaiModelSearchTimerRef.current) {
+      window.clearTimeout(openaiModelSearchTimerRef.current)
+      openaiModelSearchTimerRef.current = null
+    }
+    openaiModelRequestIdRef.current += 1
+    setOpenaiModelQuery('')
+    setOpenaiModelCandidates([])
+    setOpenaiModelTotal(0)
+    setOpenaiModelCachedAt(0)
+    setOpenaiModelError('')
+    setOpenaiModelPickerOpen(true)
+
+    await fetchOpenaiModels({ query: '', refresh: false })
+  }
+
+  const selectOpenaiModel = (value) => {
+    const model = String(value || '').trim()
+    if (!model) return
+    setOpenaiModel(model)
+    setOpenaiModelPickerOpen(false)
+    Toast.show({ content: `已选择模型：${model}` })
+  }
+
   const persist = () => {
     const config = buildAiDraftConfig()
 
@@ -1579,6 +1681,11 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
             <div className="text-xs text-slate-500">
               当前：{normalizeBaseUrl(openaiBaseUrl) || '-'} / {openaiModel || '-'}
             </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="mini" fill="outline" onClick={openOpenaiModelPicker}>
+                选择模型
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs">
@@ -1723,6 +1830,97 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
           </p>
         </div>
       </Card>
+
+      <Dialog
+        visible={openaiModelPickerOpen}
+        title="选择云端模型"
+        closeOnMaskClick={!openaiModelLoading}
+        closeOnAction={false}
+        onClose={closeOpenaiModelPicker}
+        actions={[
+          { key: 'close', text: '关闭', disabled: openaiModelLoading },
+          { key: 'refresh', text: openaiModelLoading ? '刷新中...' : '刷新', bold: true, disabled: openaiModelLoading },
+        ]}
+        onAction={(action) => {
+          if (action.key === 'refresh') {
+            fetchOpenaiModels({ query: openaiModelQuery, refresh: true })
+            return
+          }
+          closeOpenaiModelPicker()
+        }}
+        content={
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder="搜索模型，例如：gpt / llama / deepseek"
+                value={openaiModelQuery}
+                onChange={(value) => {
+                  setOpenaiModelQuery(value)
+                  scheduleOpenaiModelSearch(value)
+                }}
+                onEnterPress={() => fetchOpenaiModels({ query: openaiModelQuery, refresh: false })}
+                clearable
+                disabled={openaiModelLoading}
+              />
+              <Button
+                size="mini"
+                color="primary"
+                loading={openaiModelLoading}
+                onClick={() => fetchOpenaiModels({ query: openaiModelQuery, refresh: false })}
+              >
+                搜索
+              </Button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+              <span>
+                结果：{openaiModelCandidates.length}
+                {openaiModelTotal ? ` / ${openaiModelTotal}` : ''}
+              </span>
+              {openaiModelCachedAt ? (
+                <span>
+                  缓存：
+                  {(() => {
+                    try {
+                      return new Date(openaiModelCachedAt).toLocaleString()
+                    } catch {
+                      return ''
+                    }
+                  })()}
+                </span>
+              ) : null}
+            </div>
+
+            {openaiModelError ? (
+              <div className="rounded-xl bg-rose-50 p-3 text-xs text-rose-700">
+                {openaiModelError}
+              </div>
+            ) : null}
+
+            {openaiModelCandidates.length ? (
+              <List>
+                {openaiModelCandidates.map((modelId) => (
+                  <List.Item
+                    key={modelId}
+                    onClick={() => selectOpenaiModel(modelId)}
+                    extra={modelId === openaiModel ? '当前' : null}
+                  >
+                    <span className="break-all">{modelId}</span>
+                  </List.Item>
+                ))}
+              </List>
+            ) : (
+              <p className="text-xs text-slate-500">
+                {openaiModelLoading ? '正在拉取模型列表...' : '暂无结果'}
+              </p>
+            )}
+
+            <p className="text-xs text-slate-400">
+              来源：{normalizeBaseUrl(openaiBaseUrl) ? `${normalizeBaseUrl(openaiBaseUrl)}/models` : '未设置 Base URL'}
+            </p>
+          </div>
+        }
+      />
 
       <Dialog
         visible={importOpen}
