@@ -583,6 +583,11 @@ export async function generateFlashcards(userId, date, count, ai) {
   return data?.cards ?? []
 }
 
+export async function pingAi(ai) {
+  const { data } = await api.post('/api/ai/ping', { ai })
+  return data
+}
+
 export async function generateReport(userId, payload) {
   const { data } = await api.post('/api/ai/report', { userId, ...payload })
   return data

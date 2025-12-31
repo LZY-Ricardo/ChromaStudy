@@ -19,7 +19,7 @@ const tabs = [
   { key: '/', title: 'Today', icon: <Home size={18} /> },
   { key: '/calendar', title: 'Calendar', icon: <CalendarDays size={18} /> },
   { key: '/stats', title: 'Stats', icon: <BarChart3 size={18} /> },
-  { key: '/chat', title: 'Coach', icon: <MessageCircle size={18} /> },
+  { key: '/chat', title: 'Mate', icon: <MessageCircle size={18} /> },
   { key: '/settings', title: 'Settings', icon: <SettingsIcon size={18} /> },
 ]
 

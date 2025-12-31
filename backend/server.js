@@ -60,6 +60,68 @@ function validateOpenAiConfig(config) {
   return "";
 }
 
+function clampErrorText(text, max = 300) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  if (normalized.length <= max) return normalized;
+  return normalized.slice(0, max);
+}
+
+async function pingAi(aiConfig) {
+  if (aiConfig.provider === "openai") {
+    const error = validateOpenAiConfig(aiConfig);
+    if (error) {
+      return { ok: false, error };
+    }
+
+    const response = await fetch(`${aiConfig.baseUrl}/models`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${aiConfig.apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      return {
+        ok: false,
+        error: `openai request failed: ${response.status} ${clampErrorText(body)}`,
+      };
+    }
+
+    const data = await response.json().catch(() => ({}));
+    const models = Array.isArray(data?.data)
+      ? data.data.map((item) => item?.id).filter(Boolean)
+      : [];
+
+    return {
+      ok: true,
+      provider: "openai",
+      modelCount: models.length,
+    };
+  }
+
+  const response = await fetch(`${aiConfig.host}/api/tags`, { method: "GET" });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    return {
+      ok: false,
+      error: `ollama request failed: ${response.status} ${clampErrorText(body)}`,
+    };
+  }
+
+  const data = await response.json().catch(() => ({}));
+  const models = Array.isArray(data?.models)
+    ? data.models.map((item) => item?.name).filter(Boolean)
+    : [];
+
+  return {
+    ok: true,
+    provider: "ollama",
+    modelCount: models.length,
+    hasModel: models.includes(aiConfig.model),
+  };
+}
+
 function toDateString(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -610,6 +672,19 @@ app.delete(
 
     await prisma.task.delete({ where: { id: taskId } });
     return res.json({ ok: true });
+  })
+);
+
+app.post(
+  "/api/ai/ping",
+  asyncHandler(async (req, res) => {
+    const { ai } = req.body || {};
+    const aiConfig = resolveAiConfig(ai);
+    const result = await pingAi(aiConfig);
+    if (!result.ok) {
+      return res.status(502).json({ error: result.error || "ping failed" });
+    }
+    return res.json(result);
   })
 );
 

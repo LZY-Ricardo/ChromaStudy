@@ -9,7 +9,7 @@ function Chat() {
     {
       id: 'assistant-welcome',
       role: 'assistant',
-      content: '我是你的学习教练。今天想冲刺哪一块？',
+      content: '我是你的学习伙伴。今天想学点什么？',
     },
   ])
   const [streaming, setStreaming] = useState(false)
@@ -117,7 +117,7 @@ function Chat() {
 
   return (
     <div className="space-y-4">
-      <Card title="AI Coach" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+      <Card title="Study Mate" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
         <div className="space-y-3">
           {messages.map((message) => (
             <div
@@ -137,7 +137,7 @@ function Chat() {
       <Card className="rounded-2xl border border-slate-100 bg-white shadow-sm">
         <div className="flex flex-col gap-3">
           <Input
-            placeholder="告诉教练你的学习目标"
+            placeholder="告诉你的学习目标"
             value={draft}
             onChange={setDraft}
             onEnterPress={sendMessage}
@@ -150,7 +150,7 @@ function Chat() {
             disabled={!draft.trim() || streaming}
             onClick={sendMessage}
           >
-            {streaming ? '教练思考中...' : '发送'}
+            {streaming ? '思考中...' : '发送'}
           </Button>
         </div>
       </Card>

@@ -16,7 +16,8 @@
       "Bash(dir:*)",
       "Bash(powershell:*)",
       "Bash(start ollama serve)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(npm install:*)"
     ]
   }
 }

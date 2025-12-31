@@ -1,6 +1,14 @@
 import { useMemo, useRef, useState } from 'react'
 import { Button, Card, Dialog, Input, List, Selector, Switch, TextArea, Toast } from 'antd-mobile'
+import { pingAi } from '../services/api.js'
 import { loadAiConfig, saveAiConfig } from '../utils/storage.js'
+import {
+  detectOpenAiCompatPresetId,
+  getOpenAiCompatPreset,
+  ollamaLinks,
+  openAiCompatPresets,
+  normalizeBaseUrl,
+} from '../utils/aiPresets.js'
 import { loadWeeklyGoal, saveWeeklyGoal } from '../utils/habit.js'
 import {
   clearPendingOps,
@@ -26,6 +34,9 @@ const defaultAiConfig = {
 
 function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
   const stored = useMemo(() => loadAiConfig(), [])
+  const initialOpenaiPresetId =
+    stored?.openai?.presetId ??
+    detectOpenAiCompatPresetId(stored?.openai?.baseUrl ?? defaultAiConfig.openai.baseUrl)
   const fileInputRef = useRef(null)
   const [, bumpLocalRender] = useState(0)
   const [pendingOpen, setPendingOpen] = useState(false)
@@ -39,6 +50,9 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
   const [importWorking, setImportWorking] = useState(false)
 
   const [provider, setProvider] = useState(stored?.provider ?? defaultAiConfig.provider)
+  const [openaiPresetId, setOpenaiPresetId] = useState(initialOpenaiPresetId)
+  const [openaiAdvanced, setOpenaiAdvanced] = useState(() => initialOpenaiPresetId === 'custom')
+  const [aiTesting, setAiTesting] = useState(false)
   const [ollamaHost, setOllamaHost] = useState(
     stored?.ollama?.host ?? defaultAiConfig.ollama.host
   )
@@ -52,6 +66,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     stored?.openai?.model ?? defaultAiConfig.openai.model
   )
   const [openaiApiKey, setOpenaiApiKey] = useState(stored?.openai?.apiKey ?? '')
+  const openaiPreset = getOpenAiCompatPreset(openaiPresetId)
   const [weeklyGoal, setWeeklyGoal] = useState(() => loadWeeklyGoal(user?.id))
   const pendingCount = getPendingOpsCount(user?.id)
   const pendingOps = user?.id
@@ -858,6 +873,23 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     await prepareImportFile(file)
   }
 
+  const applyOpenaiPreset = (nextId) => {
+    const id = String(nextId || '').trim() || 'openai'
+    setOpenaiPresetId(id)
+
+    if (id === 'custom') {
+      setOpenaiAdvanced(true)
+      return
+    }
+
+    const preset = getOpenAiCompatPreset(id)
+    if (!preset) return
+
+    setOpenaiBaseUrl(preset.baseUrl)
+    setOpenaiModel(preset.defaultModel)
+    setOpenaiAdvanced(false)
+  }
+
   const persist = () => {
     const config = {
       provider,
@@ -866,9 +898,10 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
         model: ollamaModel.trim(),
       },
       openai: {
-        baseUrl: openaiBaseUrl.trim().replace(/\/+$/, ''),
+        baseUrl: normalizeBaseUrl(openaiBaseUrl),
         model: openaiModel.trim(),
         apiKey: openaiApiKey.trim(),
+        presetId: openaiPresetId,
       },
     }
 
@@ -888,6 +921,59 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
 
     saveAiConfig(config)
     Toast.show({ content: '设置已保存' })
+  }
+
+  const testAiConnection = async () => {
+    const config = {
+      provider,
+      ollama: {
+        host: ollamaHost.trim(),
+        model: ollamaModel.trim(),
+      },
+      openai: {
+        baseUrl: normalizeBaseUrl(openaiBaseUrl),
+        model: openaiModel.trim(),
+        apiKey: openaiApiKey.trim(),
+        presetId: openaiPresetId,
+      },
+    }
+
+    if (config.provider === 'openai') {
+      if (!config.openai.baseUrl || !config.openai.model || !config.openai.apiKey) {
+        Toast.show({ content: '请补全 Base URL / Model / API Key' })
+        return
+      }
+    }
+
+    if (config.provider === 'ollama') {
+      if (!config.ollama.host || !config.ollama.model) {
+        Toast.show({ content: '请补全 Ollama Host / Model' })
+        return
+      }
+    }
+
+    setAiTesting(true)
+    try {
+      const result = await pingAi(config)
+      if (result?.provider === 'ollama' && result?.hasModel === false) {
+        Toast.show({
+          content: `连接正常，但未发现模型：${config.ollama.model}（可先在 Ollama 执行：ollama pull ${config.ollama.model}）`,
+        })
+        return
+      }
+
+      if (result?.provider === 'openai' && Number.isFinite(result?.modelCount)) {
+        Toast.show({ content: `连接正常（可用模型数：${result.modelCount}）` })
+        return
+      }
+
+      Toast.show({ content: '连接正常' })
+    } catch (error) {
+      const message = error?.response?.data?.error ?? error?.message ?? '连接失败，请检查配置/网络'
+      Toast.show({ content: String(message) })
+    } finally {
+      setAiTesting(false)
+    }
   }
 
   const requestNotificationPermission = async () => {
@@ -1060,6 +1146,71 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
           />
         </div>
 
+        {provider === 'openai' ? (
+          <div className="mt-3 space-y-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+              Cloud Preset
+            </div>
+            <Selector
+              options={openAiCompatPresets.map((item) => ({ label: item.label, value: item.id }))}
+              value={[openaiPresetId]}
+              onChange={(values) => applyOpenaiPreset(values[0] ?? 'openai')}
+            />
+            {openaiPreset?.links?.home || openaiPreset?.links?.console || openaiPreset?.links?.docs ? (
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                {openaiPreset?.links?.home ? (
+                  <a
+                    className="text-blue-600"
+                    href={openaiPreset.links.home}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    官网
+                  </a>
+                ) : null}
+                {openaiPreset?.links?.console ? (
+                  <a
+                    className="text-blue-600"
+                    href={openaiPreset.links.console}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    控制台/Key
+                  </a>
+                ) : null}
+                {openaiPreset?.links?.docs ? (
+                  <a
+                    className="text-blue-600"
+                    href={openaiPreset.links.docs}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    文档
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
+            <p className="text-xs text-slate-400">
+              常用只需粘贴 API Key；Base URL/Model 可在“高级设置”里调整。
+            </p>
+            <div className="text-xs text-slate-500">
+              当前：{normalizeBaseUrl(openaiBaseUrl) || '-'} / {openaiModel || '-'}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+            <a className="text-blue-600" href={ollamaLinks.home} target="_blank" rel="noreferrer">
+              Ollama 官网
+            </a>
+            <a className="text-blue-600" href={ollamaLinks.library} target="_blank" rel="noreferrer">
+              模型库
+            </a>
+            <a className="text-blue-600" href={ollamaLinks.docs} target="_blank" rel="noreferrer">
+              文档
+            </a>
+          </div>
+        )}
+
         <List className="mt-3">
           {provider === 'ollama' ? (
             <>
@@ -1084,22 +1235,6 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
             <>
               <List.Item>
                 <Input
-                  placeholder="Base URL，例如：https://api.openai.com/v1"
-                  value={openaiBaseUrl}
-                  onChange={setOpenaiBaseUrl}
-                  clearable
-                />
-              </List.Item>
-              <List.Item>
-                <Input
-                  placeholder="Model，例如：gpt-4o-mini / deepseek-chat"
-                  value={openaiModel}
-                  onChange={setOpenaiModel}
-                  clearable
-                />
-              </List.Item>
-              <List.Item>
-                <Input
                   type="password"
                   placeholder="API Key（仅存本地浏览器）"
                   value={openaiApiKey}
@@ -1107,12 +1242,55 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
                   clearable
                 />
               </List.Item>
+              <List.Item
+                extra={
+                  <Switch
+                    checked={openaiAdvanced}
+                    onChange={(value) => setOpenaiAdvanced(Boolean(value))}
+                  />
+                }
+              >
+                高级设置（Base URL / Model）
+              </List.Item>
+              {openaiAdvanced ? (
+                <>
+                  <List.Item>
+                    <Input
+                      placeholder="Base URL，例如：https://api.openai.com/v1"
+                      value={openaiBaseUrl}
+                      onChange={(value) => {
+                        setOpenaiBaseUrl(value)
+                        if (openaiPresetId !== 'custom') {
+                          setOpenaiPresetId('custom')
+                        }
+                      }}
+                      clearable
+                    />
+                  </List.Item>
+                  <List.Item>
+                    <Input
+                      placeholder="Model，例如：gpt-4o-mini / deepseek-chat"
+                      value={openaiModel}
+                      onChange={(value) => {
+                        setOpenaiModel(value)
+                        if (openaiPresetId !== 'custom') {
+                          setOpenaiPresetId('custom')
+                        }
+                      }}
+                      clearable
+                    />
+                  </List.Item>
+                </>
+              ) : null}
             </>
           )}
         </List>
 
-        <div className="mt-4">
-          <Button block color="primary" onClick={persist}>
+        <div className="mt-4 space-y-2">
+          <Button block fill="outline" loading={aiTesting} onClick={testAiConnection}>
+            测试连接
+          </Button>
+          <Button block color="primary" onClick={persist} disabled={aiTesting}>
             保存 AI 设置
           </Button>
           <p className="mt-2 text-xs text-slate-400">
