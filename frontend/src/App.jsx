@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { TabBar, Toast } from 'antd-mobile'
+import { ActionSheet, TabBar, Toast } from 'antd-mobile'
 import { BarChart3, CalendarDays, Home, MessageCircle, Settings as SettingsIcon } from 'lucide-react'
 import Login from './pages/Login.jsx'
 import Today from './pages/Today.jsx'
@@ -11,9 +11,17 @@ import DayDetail from './pages/DayDetail.jsx'
 import Stats from './pages/Stats.jsx'
 import Focus from './pages/Focus.jsx'
 import Review from './pages/Review.jsx'
-import { clearUser, loadUser, saveUser } from './utils/storage.js'
+import {
+  clearUser,
+  loadAiConfig,
+  loadAiState,
+  loadUser,
+  saveUser,
+  setActiveAiProfile,
+} from './utils/storage.js'
 import { syncPendingOps } from './services/api.js'
 import { getPendingOpsCount } from './utils/syncQueue.js'
+import { detectOpenAiCompatPresetId, getOpenAiCompatPreset } from './utils/aiPresets.js'
 
 const tabs = [
   { key: '/', title: 'Today', icon: <Home size={18} /> },
@@ -28,6 +36,8 @@ function Shell() {
   const navigate = useNavigate()
   const activeKey = tabs.find((tab) => tab.key === location.pathname)?.key ?? '/'
   const [user, setUser] = useState(() => loadUser())
+  const [aiState, setAiState] = useState(() => loadAiState())
+  const [aiConfig, setAiConfig] = useState(() => loadAiConfig())
   const [syncTick, setSyncTick] = useState(0)
   const [syncing, setSyncing] = useState(false)
   const [lastSync, setLastSync] = useState(null)
@@ -95,6 +105,15 @@ function Shell() {
   }, [runSync, user?.id])
 
   useEffect(() => {
+    const handler = () => {
+      setAiState(loadAiState())
+      setAiConfig(loadAiConfig())
+    }
+    window.addEventListener('chroma_ai_changed', handler)
+    return () => window.removeEventListener('chroma_ai_changed', handler)
+  }, [])
+
+  useEffect(() => {
     if (!user?.id) return undefined
     const handler = () => runSync('online')
     window.addEventListener('online', handler)
@@ -119,6 +138,87 @@ function Shell() {
 
   const shellClassName = hideTabBar ? 'app-shell app-shell--no-tabbar' : 'app-shell app-shell--tabbar'
 
+  const activeAiProfile =
+    aiState?.profiles?.find((profile) => profile.id === aiState.activeProfileId) ??
+    aiState?.profiles?.[0] ??
+    null
+
+  const aiProvider = aiConfig?.provider ?? null
+  const aiModel =
+    aiProvider === 'openai'
+      ? aiConfig?.openai?.model
+      : aiProvider === 'ollama'
+        ? aiConfig?.ollama?.model
+        : ''
+
+  let aiVendorLabel = 'AI'
+  if (aiProvider === 'openai') {
+    const presetId =
+      aiConfig?.openai?.presetId || detectOpenAiCompatPresetId(aiConfig?.openai?.baseUrl)
+    const preset = getOpenAiCompatPreset(presetId)
+    aiVendorLabel = preset?.label || '云端'
+  } else if (aiProvider === 'ollama') {
+    aiVendorLabel = 'Ollama'
+  }
+
+  const aiPillTitle = activeAiProfile?.name || aiVendorLabel
+  const aiPillLabel = aiProvider ? (aiModel ? `${aiPillTitle} · ${aiModel}` : aiPillTitle) : 'AI 未配置'
+  const aiDotClass = activeAiProfile?.health?.at
+    ? activeAiProfile.health.ok
+      ? 'bg-emerald-400'
+      : 'bg-rose-400'
+    : 'bg-slate-300'
+
+  const formatProfileDescription = (profile) => {
+    if (!profile) return ''
+    if (profile.provider === 'openai') {
+      const presetId =
+        profile?.openai?.presetId || detectOpenAiCompatPresetId(profile?.openai?.baseUrl)
+      const preset = getOpenAiCompatPreset(presetId)
+      const vendor = preset?.label || '云端'
+      const model = profile?.openai?.model || '-'
+      return `${vendor} · ${model}`
+    }
+    const model = profile?.ollama?.model || '-'
+    return `Ollama · ${model}`
+  }
+
+  const openAiSwitcher = () => {
+    const state = loadAiState() ?? aiState
+    if (!state?.profiles?.length) {
+      navigate('/settings')
+      return
+    }
+
+    const actions = [
+      ...state.profiles.map((profile) => ({
+        key: profile.id,
+        text: profile.name || profile.id,
+        description: formatProfileDescription(profile),
+        bold: profile.id === state.activeProfileId,
+        onClick: () => {
+          const ok = setActiveAiProfile(profile.id)
+          if (ok) {
+            Toast.show({ content: `已切换到：${profile.name || profile.id}` })
+          } else {
+            Toast.show({ content: '切换失败' })
+          }
+        },
+      })),
+      {
+        key: '__settings',
+        text: '管理 AI 设置',
+        onClick: () => navigate('/settings'),
+      },
+    ]
+
+    ActionSheet.show({
+      actions,
+      cancelText: '取消',
+      closeOnAction: true,
+    })
+  }
+
   return (
     <div className={shellClassName}>
       <header className="flex items-center justify-between">
@@ -128,10 +228,14 @@ function Shell() {
             Focus. Log. Level up.
           </h1>
         </div>
-        <div className="flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-slate-500 shadow-sm">
-          <span className="h-2 w-2 rounded-full bg-emerald-400" />
-          Local AI ready
-        </div>
+        <button
+          type="button"
+          className="flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-slate-500 shadow-sm"
+          onClick={openAiSwitcher}
+        >
+          <span className={`h-2 w-2 rounded-full ${aiDotClass}`} />
+          {aiPillLabel}
+        </button>
       </header>
 
       <main className="app-main flex-1 min-h-0">

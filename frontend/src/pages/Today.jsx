@@ -15,7 +15,7 @@ import {
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GripVertical, PencilLine, Trash2 } from 'lucide-react'
+import { GripVertical, PencilLine, Trash2, Share2 } from 'lucide-react'
 import {
   checkin,
   createTask,
@@ -32,6 +32,7 @@ import { loadTaskOrder, saveTaskOrder, sortByOrder } from '../utils/taskOrder.js
 import { loadWeeklyGoal } from '../utils/habit.js'
 import { countDueReviewCards } from '../utils/flashcards.js'
 import { useNavigate } from 'react-router-dom'
+import ShareDialog from '../components/ShareCard.jsx'
 
 function SortableTaskItem({ task, disabled, onToggle }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -101,6 +102,9 @@ function Today({ user, syncTick }) {
   const [aiConstraints, setAiConstraints] = useState('')
   const [aiGeneratedTasks, setAiGeneratedTasks] = useState([])
   const [aiWorking, setAiWorking] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [showFillPrompt, setShowFillPrompt] = useState(false)
+  const [generatedContent, setGeneratedContent] = useState('')
 
   const todayLog = useMemo(
     () => logs.find((log) => log.date === todayKey),
@@ -487,6 +491,69 @@ function Today({ user, syncTick }) {
     saveTaskOrder(user.id, withNew)
   }
 
+  // 准备分享数据
+  const getShareData = () => {
+    const completedTasks = tasks.filter((task) => task.isDone).map((task) => task.title)
+    return {
+      date: todayKey,
+      duration: todayLog?.duration || 0,
+      streak: streakDays,
+      completedTasks,
+      content: todayLog?.content || '',
+    }
+  }
+
+  const handleShare = () => {
+    setShareOpen(true)
+  }
+
+  // 生成基于已完成任务的学习总结
+  const generateContentFromTasks = () => {
+    const completedTasks = tasks.filter((task) => task.isDone)
+    if (completedTasks.length === 0) return ''
+
+    const taskTitles = completedTasks.map((task) => task.title)
+    // 移除任务标题中的时间估算部分（如 "约30m"）
+    const cleanTitles = taskTitles.map((title) =>
+      title.replace(/[（(][^）)]*[约约]\d+\s*[m分][）)]/g, '').trim()
+    )
+
+    if (cleanTitles.length === 1) {
+      return `今天完成了：${cleanTitles[0]}`
+    }
+
+    let summary = '今天完成了以下任务：\n'
+    cleanTitles.forEach((title, index) => {
+      summary += `${index + 1}. ${title}\n`
+    })
+    return summary.trim()
+  }
+
+  // 打开打卡对话框时检查是否需要预填充提示
+  const openCheckinDialog = () => {
+    const completedTasks = tasks.filter((task) => task.isDone)
+    if (completedTasks.length > 0 && !content.trim()) {
+      const autoContent = generateContentFromTasks()
+      setGeneratedContent(autoContent)
+      setShowFillPrompt(true)
+    } else {
+      setCheckinOpen(true)
+    }
+  }
+
+  // 使用自动生成的内容
+  const useGeneratedContent = () => {
+    setContent(generatedContent)
+    setShowFillPrompt(false)
+    setCheckinOpen(true)
+  }
+
+  // 手动输入
+  const manualInput = () => {
+    setShowFillPrompt(false)
+    setCheckinOpen(true)
+  }
+
   return (
     <div className="space-y-4">
       <Card className="rounded-2xl border border-slate-100 bg-white shadow-sm">
@@ -502,9 +569,19 @@ function Today({ user, syncTick }) {
                   : '今日尚未打卡'}
             </p>
           </div>
-          <Tag color={todayLog ? 'success' : 'warning'} fill="outline">
-            {completedCount}/{tasks.length} done
-          </Tag>
+          <div className="flex items-center gap-2">
+            <Tag color={todayLog ? 'success' : 'warning'} fill="outline">
+              {completedCount}/{tasks.length} done
+            </Tag>
+            <Button
+              size="small"
+              fill="outline"
+              onClick={handleShare}
+              disabled={!todayLog || todayLog.duration <= 0}
+            >
+              <Share2 size={16} />
+            </Button>
+          </div>
         </div>
       </Card>
 
@@ -777,7 +854,7 @@ function Today({ user, syncTick }) {
           记录学习时长与笔记，AI 会给你 50 字内的专属点评。
         </p>
         <div className="mt-4 flex items-center gap-3">
-          <Button block color="primary" size="large" onClick={() => setCheckinOpen(true)}>
+          <Button block color="primary" size="large" onClick={openCheckinDialog}>
             完成学习
           </Button>
           <Button block color="default" size="large" fill="outline" onClick={() => setTaskOpen(true)}>
@@ -826,6 +903,45 @@ function Today({ user, syncTick }) {
               showCount
               maxLength={200}
             />
+          </div>
+        }
+      />
+
+      {/* 智能预填充确认对话框 */}
+      <Dialog
+        visible={showFillPrompt}
+        title="智能预填充"
+        closeOnMaskClick
+        onClose={() => setShowFillPrompt(false)}
+        actions={[
+          { key: 'manual', text: '手动输入' },
+          {
+            key: 'use',
+            text: '使用预填充',
+            bold: true,
+            primary: true,
+          },
+        ]}
+        onAction={(action) => {
+          if (action.key === 'use') {
+            useGeneratedContent()
+          } else {
+            manualInput()
+          }
+        }}
+        content={
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              ✨ 检测到你今天完成了 <span className="font-semibold text-emerald-600">
+                {tasks.filter((task) => task.isDone).length}
+              </span> 个任务，已为你生成学习总结模板：
+            </p>
+            <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+              <pre className="whitespace-pre-wrap font-sans">{generatedContent}</pre>
+            </div>
+            <p className="text-xs text-slate-400">
+              使用后可继续编辑修改
+            </p>
           </div>
         }
       />
@@ -973,6 +1089,12 @@ function Today({ user, syncTick }) {
             clearable
           />
         }
+      />
+
+      <ShareDialog
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        data={getShareData()}
       />
     </div>
   )

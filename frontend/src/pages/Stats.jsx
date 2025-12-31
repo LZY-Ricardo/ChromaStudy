@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import { Button, Card, Dialog, Toast } from 'antd-mobile'
+import { Share2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { generateReport, getStudyLogs } from '../services/api.js'
 import { loadWeeklyGoal } from '../utils/habit.js'
 import { loadAiConfig } from '../utils/storage.js'
+import ShareDialog from '../components/ShareCard.jsx'
 
 function Stats({ user, syncTick }) {
   const navigate = useNavigate()
@@ -12,6 +14,7 @@ function Stats({ user, syncTick }) {
   const [loading, setLoading] = useState(false)
   const [reportLoading, setReportLoading] = useState(false)
   const [reportData, setReportData] = useState(null)
+  const [shareOpen, setShareOpen] = useState(false)
 
   useEffect(() => {
     if (!user?.id) return
@@ -163,6 +166,23 @@ function Stats({ user, syncTick }) {
     }
   }
 
+  // 准备分享数据（使用今日数据）
+  const getShareData = () => {
+    const today = dayjs().format('YYYY-MM-DD')
+    const todayLog = logs.find((log) => log.date === today)
+    return {
+      date: today,
+      duration: todayLog?.duration || 0,
+      streak: streakDays,
+      completedTasks: [], // Stats 页面没有任务数据
+      content: todayLog?.content || '',
+    }
+  }
+
+  const handleShare = () => {
+    setShareOpen(true)
+  }
+
   return (
     <div className="space-y-4">
       <Card className="rounded-2xl border border-slate-100 bg-white shadow-sm">
@@ -172,14 +192,24 @@ function Stats({ user, syncTick }) {
             <p className="display-font text-3xl font-semibold text-slate-900">{streakDays} days</p>
             <p className="mt-1 text-xs text-slate-500">口径：当日 duration &gt; 0</p>
           </div>
-          <Button
-            size="small"
-            fill="outline"
-            onClick={() => navigate('/settings')}
-            disabled={loading}
-          >
-            修改周目标
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="small"
+              fill="outline"
+              onClick={() => navigate('/settings')}
+              disabled={loading}
+            >
+              修改周目标
+            </Button>
+            <Button
+              size="small"
+              fill="outline"
+              onClick={handleShare}
+              disabled={loading || streakDays === 0}
+            >
+              <Share2 size={16} />
+            </Button>
+          </div>
         </div>
       </Card>
 
@@ -261,6 +291,12 @@ function Stats({ user, syncTick }) {
           </p>
         ) : null}
       </Card>
+
+      <ShareDialog
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        data={getShareData()}
+      />
     </div>
   )
 }

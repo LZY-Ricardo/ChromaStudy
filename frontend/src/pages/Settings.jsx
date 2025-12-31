@@ -1,7 +1,13 @@
 import { useMemo, useRef, useState } from 'react'
-import { Button, Card, Dialog, Input, List, Selector, Switch, TextArea, Toast } from 'antd-mobile'
+import { ActionSheet, Button, Card, Dialog, Input, List, Selector, Switch, TextArea, Toast } from 'antd-mobile'
 import { pingAi } from '../services/api.js'
-import { loadAiConfig, saveAiConfig } from '../utils/storage.js'
+import {
+  deleteAiProfile,
+  loadAiConfig,
+  loadAiState,
+  saveAiConfig,
+  saveAiState,
+} from '../utils/storage.js'
 import {
   detectOpenAiCompatPresetId,
   getOpenAiCompatPreset,
@@ -33,7 +39,29 @@ const defaultAiConfig = {
 }
 
 function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
-  const stored = useMemo(() => loadAiConfig(), [])
+  const initialAiState = useMemo(() => {
+    const state = loadAiState()
+    if (state) return state
+    const presetId = detectOpenAiCompatPresetId(defaultAiConfig.openai.baseUrl)
+    return {
+      version: 2,
+      activeProfileId: 'local',
+      profiles: [
+        {
+          id: 'local',
+          name: '本地 Ollama',
+          provider: defaultAiConfig.provider,
+          ollama: { ...defaultAiConfig.ollama },
+          openai: { ...defaultAiConfig.openai, presetId },
+          health: null,
+        },
+      ],
+    }
+  }, [])
+  const [aiState, setAiState] = useState(initialAiState)
+  const activeProfile =
+    aiState.profiles.find((profile) => profile.id === aiState.activeProfileId) ?? aiState.profiles[0]
+  const stored = activeProfile
   const initialOpenaiPresetId =
     stored?.openai?.presetId ??
     detectOpenAiCompatPresetId(stored?.openai?.baseUrl ?? defaultAiConfig.openai.baseUrl)
@@ -475,10 +503,30 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
 
     const copy = (value) => (value && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value)
 
-    const aiConfig = copy(loadAiConfig())
-    if (aiConfig?.openai && typeof aiConfig.openai === 'object') {
-      aiConfig.openai.apiKey = ''
+    const scrubAiSecrets = (value) => {
+      if (!value || typeof value !== 'object') return value
+      const next = copy(value)
+
+      if (Array.isArray(next?.profiles)) {
+        next.profiles = next.profiles.map((profile) => {
+          if (!profile || typeof profile !== 'object') return profile
+          const nextProfile = copy(profile)
+          if (nextProfile?.openai && typeof nextProfile.openai === 'object') {
+            nextProfile.openai.apiKey = ''
+          }
+          return nextProfile
+        })
+        return next
+      }
+
+      if (next?.openai && typeof next.openai === 'object') {
+        next.openai.apiKey = ''
+      }
+
+      return next
     }
+
+    const aiConfig = scrubAiSecrets(loadAiState() ?? loadAiConfig())
 
     const userId = user.id
     const tasksCacheKey = `chroma_cache_tasks_${userId}`
@@ -504,14 +552,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     const reviewCards = safeParse(window.localStorage.getItem(reviewCardsKey))
 
     const rawQueue = safeParse(window.localStorage.getItem(queueKey))
-    const scrubAi = (value) => {
-      if (!value || typeof value !== 'object') return value
-      const next = copy(value)
-      if (next?.openai && typeof next.openai === 'object') {
-        next.openai.apiKey = ''
-      }
-      return next
-    }
+    const scrubAi = scrubAiSecrets
 
     const scrubOp = (op) => {
       const next = copy(op)
@@ -713,19 +754,60 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
       if (importOptions.aiConfig) {
         const incomingAi = data.aiConfig && typeof data.aiConfig === 'object' ? data.aiConfig : null
         if (incomingAi) {
+          const existingState = loadAiState()
           const existing = loadAiConfig()
-          const existingKey =
-            typeof existing?.openai?.apiKey === 'string' ? existing.openai.apiKey : ''
           const nextAi = JSON.parse(JSON.stringify(incomingAi))
-          if (nextAi?.openai && typeof nextAi.openai === 'object') {
-            nextAi.openai.apiKey = existingKey
-          } else if (existingKey) {
-            nextAi.openai = { ...(nextAi.openai || {}), apiKey: existingKey }
-          }
 
-          const rawAi = safeStringify(nextAi)
-          if (rawAi) {
-            window.localStorage.setItem('chroma_ai', rawAi)
+          if (Array.isArray(nextAi?.profiles)) {
+            const byId = new Map(
+              (Array.isArray(existingState?.profiles) ? existingState.profiles : [])
+                .filter((p) => p?.id)
+                .map((p) => [p.id, p])
+            )
+            const byName = new Map()
+            const duplicateNames = new Set()
+            for (const p of Array.isArray(existingState?.profiles) ? existingState.profiles : []) {
+              const name = String(p?.name || '').trim()
+              if (!name) continue
+              if (byName.has(name)) {
+                duplicateNames.add(name)
+                byName.set(name, null)
+              } else {
+                byName.set(name, p)
+              }
+            }
+
+            nextAi.profiles = nextAi.profiles.map((profile) => {
+              if (!profile || typeof profile !== 'object') return profile
+              const id = String(profile?.id || '').trim()
+              const name = String(profile?.name || '').trim()
+              const matched =
+                (id && byId.get(id)) || (!duplicateNames.has(name) ? byName.get(name) : null)
+              if (!matched) return profile
+              if (
+                profile?.openai &&
+                typeof profile.openai === 'object' &&
+                !String(profile.openai.apiKey || '').trim()
+              ) {
+                const apiKey = String(matched?.openai?.apiKey || '').trim()
+                if (apiKey) {
+                  profile.openai.apiKey = apiKey
+                }
+              }
+              return profile
+            })
+
+            saveAiState(nextAi)
+          } else {
+            const existingKey =
+              typeof existing?.openai?.apiKey === 'string' ? existing.openai.apiKey : ''
+            if (nextAi?.openai && typeof nextAi.openai === 'object') {
+              nextAi.openai.apiKey = existingKey
+            } else if (existingKey) {
+              nextAi.openai = { ...(nextAi.openai || {}), apiKey: existingKey }
+            }
+
+            saveAiConfig(nextAi)
           }
         }
       }
@@ -873,6 +955,265 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     await prepareImportFile(file)
   }
 
+  const buildAiDraftConfig = () => ({
+    provider,
+    ollama: {
+      host: ollamaHost.trim(),
+      model: ollamaModel.trim(),
+    },
+    openai: {
+      baseUrl: normalizeBaseUrl(openaiBaseUrl),
+      model: openaiModel.trim(),
+      apiKey: openaiApiKey.trim(),
+      presetId: openaiPresetId,
+    },
+  })
+
+  const buildProfileConfig = (profile) => ({
+    provider: profile?.provider ?? defaultAiConfig.provider,
+    ollama: {
+      host: String(profile?.ollama?.host ?? defaultAiConfig.ollama.host),
+      model: String(profile?.ollama?.model ?? defaultAiConfig.ollama.model),
+    },
+    openai: {
+      baseUrl: normalizeBaseUrl(profile?.openai?.baseUrl ?? defaultAiConfig.openai.baseUrl),
+      model: String(profile?.openai?.model ?? defaultAiConfig.openai.model),
+      apiKey: String(profile?.openai?.apiKey ?? ''),
+      presetId: String(profile?.openai?.presetId ?? ''),
+    },
+  })
+
+  const isAiDraftDirty = () => {
+    const draft = buildAiDraftConfig()
+    const saved = buildProfileConfig(activeProfile)
+    try {
+      return JSON.stringify(draft) !== JSON.stringify(saved)
+    } catch {
+      return true
+    }
+  }
+
+  const applyProfileToForm = (profile) => {
+    const next = profile || {}
+    setProvider(next?.provider ?? defaultAiConfig.provider)
+    setOllamaHost(next?.ollama?.host ?? defaultAiConfig.ollama.host)
+    setOllamaModel(next?.ollama?.model ?? defaultAiConfig.ollama.model)
+    setOpenaiBaseUrl(next?.openai?.baseUrl ?? defaultAiConfig.openai.baseUrl)
+    setOpenaiModel(next?.openai?.model ?? defaultAiConfig.openai.model)
+    setOpenaiApiKey(next?.openai?.apiKey ?? '')
+
+    const presetId =
+      next?.openai?.presetId ||
+      detectOpenAiCompatPresetId(next?.openai?.baseUrl ?? defaultAiConfig.openai.baseUrl)
+    const normalizedPresetId = presetId || 'custom'
+    setOpenaiPresetId(normalizedPresetId)
+    setOpenaiAdvanced(normalizedPresetId === 'custom')
+  }
+
+  const promptProfileName = async (title, defaultValue) => {
+    let draft = String(defaultValue ?? '').trim()
+    return new Promise((resolve) => {
+      Dialog.show({
+        title,
+        content: (
+          <Input
+            placeholder="例如：本地 / OpenAI / DeepSeek"
+            defaultValue={draft}
+            onChange={(value) => {
+              draft = value
+            }}
+            clearable
+          />
+        ),
+        closeOnAction: true,
+        actions: [
+          [
+            { key: 'cancel', text: '取消', onClick: () => resolve(null) },
+            {
+              key: 'ok',
+              text: '确定',
+              bold: true,
+              onClick: () => resolve(String(draft || '').trim() || null),
+            },
+          ],
+        ],
+      })
+    })
+  }
+
+  const uniqueProfileName = (seed) => {
+    const base = String(seed || '').trim() || '新配置'
+    const exists = new Set(aiState.profiles.map((p) => String(p?.name || '').trim()).filter(Boolean))
+    if (!exists.has(base)) return base
+    let i = 2
+    while (exists.has(`${base} ${i}`)) {
+      i += 1
+    }
+    return `${base} ${i}`
+  }
+
+  const newProfileId = () => {
+    if (typeof crypto !== 'undefined' && crypto?.randomUUID) {
+      return crypto.randomUUID()
+    }
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  }
+
+  const switchProfile = async (nextId) => {
+    const id = String(nextId || '').trim()
+    if (!id || id === aiState.activeProfileId) return
+    const next = aiState.profiles.find((profile) => profile.id === id)
+    if (!next) return
+
+    if (isAiDraftDirty()) {
+      const confirmed = await Dialog.confirm({
+        title: '切换配置？',
+        content: '当前配置未保存，切换会丢失未保存的修改。',
+        confirmText: '继续切换',
+      })
+      if (!confirmed) return
+    }
+
+    const nextState = { ...aiState, activeProfileId: id }
+    setAiState(nextState)
+    saveAiState(nextState)
+    applyProfileToForm(next)
+  }
+
+  const createProfile = () => {
+    const actions = [
+      { key: 'ollama', text: '本地：Ollama（默认）' },
+      ...openAiCompatPresets
+        .filter((preset) => preset.id !== 'custom')
+        .map((preset) => ({
+          key: `openai:${preset.id}`,
+          text: `云端：${preset.label}`,
+        })),
+    ]
+
+    ActionSheet.show({
+      actions,
+      cancelText: '取消',
+      closeOnAction: true,
+      onAction: (action) => {
+        const key = String(action?.key ?? '')
+        if (!key) return
+        window.setTimeout(async () => {
+          const id = newProfileId()
+          if (key === 'ollama') {
+            const name = await promptProfileName('新建配置', uniqueProfileName('本地 Ollama'))
+            if (!name) return
+            const presetId = detectOpenAiCompatPresetId(defaultAiConfig.openai.baseUrl)
+            const profile = {
+              id,
+              name,
+              provider: 'ollama',
+              ollama: { ...defaultAiConfig.ollama },
+              openai: { ...defaultAiConfig.openai, presetId },
+              health: null,
+            }
+            const next = {
+              ...aiState,
+              activeProfileId: id,
+              profiles: [...aiState.profiles, profile],
+            }
+            setAiState(next)
+            saveAiState(next)
+            applyProfileToForm(profile)
+            return
+          }
+
+          if (key.startsWith('openai:')) {
+            const presetId = key.slice('openai:'.length)
+            const preset = getOpenAiCompatPreset(presetId)
+            if (!preset) return
+            const name = await promptProfileName('新建配置', uniqueProfileName(preset.label))
+            if (!name) return
+            const profile = {
+              id,
+              name,
+              provider: 'openai',
+              ollama: { ...defaultAiConfig.ollama },
+              openai: {
+                baseUrl: preset.baseUrl,
+                model: preset.defaultModel,
+                apiKey: '',
+                presetId: preset.id,
+              },
+              health: null,
+            }
+            const next = {
+              ...aiState,
+              activeProfileId: id,
+              profiles: [...aiState.profiles, profile],
+            }
+            setAiState(next)
+            saveAiState(next)
+            applyProfileToForm(profile)
+          }
+        }, 0)
+      },
+    })
+  }
+
+  const duplicateProfile = async () => {
+    const id = newProfileId()
+    const name = await promptProfileName('复制当前配置', uniqueProfileName(`${activeProfile?.name || '配置'} 副本`))
+    if (!name) return
+    const draft = buildAiDraftConfig()
+    const profile = {
+      id,
+      name,
+      ...draft,
+      health: null,
+    }
+    const next = {
+      ...aiState,
+      activeProfileId: id,
+      profiles: [...aiState.profiles, profile],
+    }
+    setAiState(next)
+    saveAiState(next)
+    applyProfileToForm(profile)
+  }
+
+  const renameProfile = async () => {
+    const currentName = String(activeProfile?.name || '').trim() || '配置'
+    const nextName = await promptProfileName('重命名配置', currentName)
+    if (!nextName) return
+    const nextState = {
+      ...aiState,
+      profiles: aiState.profiles.map((p) => (p.id === activeProfile.id ? { ...p, name: nextName } : p)),
+    }
+    setAiState(nextState)
+    saveAiState(nextState)
+  }
+
+  const removeProfile = async () => {
+    if (aiState.profiles.length <= 1) {
+      Toast.show({ content: '至少保留一个配置' })
+      return
+    }
+    const confirmed = await Dialog.confirm({
+      title: '删除配置？',
+      content: `将删除「${activeProfile?.name || activeProfile?.id}」`,
+      confirmText: '删除',
+    })
+    if (!confirmed) return
+
+    const ok = deleteAiProfile(activeProfile.id)
+    if (!ok) {
+      Toast.show({ content: '删除失败' })
+      return
+    }
+
+    const latest = loadAiState()
+    if (!latest) return
+    setAiState(latest)
+    const next = latest.profiles.find((p) => p.id === latest.activeProfileId) ?? latest.profiles[0]
+    applyProfileToForm(next)
+  }
+
   const applyOpenaiPreset = (nextId) => {
     const id = String(nextId || '').trim() || 'openai'
     setOpenaiPresetId(id)
@@ -891,19 +1232,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
   }
 
   const persist = () => {
-    const config = {
-      provider,
-      ollama: {
-        host: ollamaHost.trim(),
-        model: ollamaModel.trim(),
-      },
-      openai: {
-        baseUrl: normalizeBaseUrl(openaiBaseUrl),
-        model: openaiModel.trim(),
-        apiKey: openaiApiKey.trim(),
-        presetId: openaiPresetId,
-      },
-    }
+    const config = buildAiDraftConfig()
 
     if (config.provider === 'openai') {
       if (!config.openai.baseUrl || !config.openai.model || !config.openai.apiKey) {
@@ -919,24 +1248,19 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
       }
     }
 
-    saveAiConfig(config)
+    const updatedProfile = { ...activeProfile, ...config }
+    const nextState = {
+      ...aiState,
+      profiles: aiState.profiles.map((p) => (p.id === activeProfile.id ? updatedProfile : p)),
+    }
+
+    setAiState(nextState)
+    saveAiState(nextState)
     Toast.show({ content: '设置已保存' })
   }
 
   const testAiConnection = async () => {
-    const config = {
-      provider,
-      ollama: {
-        host: ollamaHost.trim(),
-        model: ollamaModel.trim(),
-      },
-      openai: {
-        baseUrl: normalizeBaseUrl(openaiBaseUrl),
-        model: openaiModel.trim(),
-        apiKey: openaiApiKey.trim(),
-        presetId: openaiPresetId,
-      },
-    }
+    const config = buildAiDraftConfig()
 
     if (config.provider === 'openai') {
       if (!config.openai.baseUrl || !config.openai.model || !config.openai.apiKey) {
@@ -955,21 +1279,37 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     setAiTesting(true)
     try {
       const result = await pingAi(config)
+
+      let toastContent = '连接正常'
       if (result?.provider === 'ollama' && result?.hasModel === false) {
-        Toast.show({
-          content: `连接正常，但未发现模型：${config.ollama.model}（可先在 Ollama 执行：ollama pull ${config.ollama.model}）`,
-        })
-        return
+        toastContent = `连接正常，但未发现模型：${config.ollama.model}（可先在 Ollama 执行：ollama pull ${config.ollama.model}）`
+      } else if (result?.provider === 'openai' && Number.isFinite(result?.modelCount)) {
+        toastContent = `连接正常（可用模型数：${result.modelCount}）`
       }
 
-      if (result?.provider === 'openai' && Number.isFinite(result?.modelCount)) {
-        Toast.show({ content: `连接正常（可用模型数：${result.modelCount}）` })
-        return
+      const nextState = {
+        ...aiState,
+        profiles: aiState.profiles.map((p) =>
+          p.id === activeProfile.id
+            ? { ...p, health: { ok: true, at: Date.now(), message: toastContent } }
+            : p
+        ),
       }
-
-      Toast.show({ content: '连接正常' })
+      setAiState(nextState)
+      saveAiState(nextState)
+      Toast.show({ content: toastContent })
     } catch (error) {
       const message = error?.response?.data?.error ?? error?.message ?? '连接失败，请检查配置/网络'
+      const nextState = {
+        ...aiState,
+        profiles: aiState.profiles.map((p) =>
+          p.id === activeProfile.id
+            ? { ...p, health: { ok: false, at: Date.now(), message: String(message) } }
+            : p
+        ),
+      }
+      setAiState(nextState)
+      saveAiState(nextState)
       Toast.show({ content: String(message) })
     } finally {
       setAiTesting(false)
@@ -1133,6 +1473,49 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
 
       <Card title="AI Provider" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
         <div className="space-y-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+            配置档案
+          </div>
+          <Selector
+            options={aiState.profiles.map((p) => ({ label: p.name || p.id, value: p.id }))}
+            value={[aiState.activeProfileId]}
+            onChange={(values) => switchProfile(values[0])}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button size="mini" fill="outline" onClick={createProfile}>
+              新建
+            </Button>
+            <Button size="mini" fill="outline" onClick={duplicateProfile}>
+              复制
+            </Button>
+            <Button size="mini" fill="outline" onClick={renameProfile}>
+              重命名
+            </Button>
+            <Button
+              size="mini"
+              color="danger"
+              fill="outline"
+              disabled={aiState.profiles.length <= 1}
+              onClick={removeProfile}
+            >
+              删除
+            </Button>
+          </div>
+          <p className="text-xs text-slate-400">
+            最近测试：
+            {activeProfile?.health?.at
+              ? `${activeProfile.health.ok ? '通过' : '失败'} · ${(() => {
+                  try {
+                    return new Date(activeProfile.health.at).toLocaleString()
+                  } catch {
+                    return ''
+                  }
+                })()}`
+              : '未测试'}
+          </p>
+        </div>
+
+        <div className="mt-4 space-y-3">
           <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
             Provider
           </div>
