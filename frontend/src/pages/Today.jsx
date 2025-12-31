@@ -30,6 +30,7 @@ import {
 import { loadAiConfig } from '../utils/storage.js'
 import { loadTaskOrder, saveTaskOrder, sortByOrder } from '../utils/taskOrder.js'
 import { loadWeeklyGoal } from '../utils/habit.js'
+import { countDueReviewCards } from '../utils/flashcards.js'
 import { useNavigate } from 'react-router-dom'
 
 function SortableTaskItem({ task, disabled, onToggle }) {
@@ -138,6 +139,31 @@ function Today({ user, syncTick }) {
     }
     return count
   }, [logs, todayKey])
+
+  const dueReviewCount = useMemo(() => {
+    if (!user?.id) return 0
+    return countDueReviewCards(user.id, todayKey)
+  }, [todayKey, user?.id])
+
+  const defaultReviewSourceDate = useMemo(() => {
+    if (todayLog?.duration > 0 && String(todayLog?.content || '').trim()) {
+      return todayKey
+    }
+
+    let best = ''
+    for (const log of logs) {
+      const date = String(log?.date || '').trim()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+      const minutes = Number(log?.duration) || 0
+      const content = String(log?.content || '').trim()
+      if (minutes <= 0 || !content) continue
+      if (!best || date > best) {
+        best = date
+      }
+    }
+
+    return best || todayKey
+  }, [logs, todayKey, todayLog?.content, todayLog?.duration])
 
   useEffect(() => {
     if (!user?.id) {
@@ -520,6 +546,27 @@ function Today({ user, syncTick }) {
             查看统计
           </Button>
         </div>
+      </Card>
+
+      <Card title="答题复习" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+        <p className="text-sm text-slate-500">
+          今日待复习 <span className="font-semibold text-slate-900">{dueReviewCount}</span> 题 ·
+          每天 3~10 分钟巩固学习内容。
+        </p>
+        <div className="mt-4 flex items-center gap-3">
+          <Button block color="primary" size="large" onClick={() => navigate('/review')} disabled={dueReviewCount === 0}>
+            {dueReviewCount ? `开始复习（${dueReviewCount}）` : '暂无到期题卡'}
+          </Button>
+          <Button
+            block
+            fill="outline"
+            size="large"
+            onClick={() => navigate(`/review?date=${defaultReviewSourceDate}`)}
+          >
+            生成题卡
+          </Button>
+        </div>
+        <p className="mt-2 text-xs text-slate-400">复习耗时会计入今天学习时长（用于周目标与 streak）。</p>
       </Card>
 
       <Card title="AI 任务拆解" className="rounded-2xl border border-slate-100 bg-white shadow-sm">

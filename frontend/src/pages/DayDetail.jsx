@@ -297,6 +297,23 @@ function DayDetail({ user, syncTick }) {
         )}
       </Card>
 
+      <Card title="答题复习（题卡）" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+        <p className="text-sm text-slate-500">
+          把当天学习内容生成题卡，之后会按间隔重复在 Today 里提醒你复习；复习耗时会计入学习时长。
+        </p>
+        <div className="mt-4">
+          <Button
+            size="small"
+            color="primary"
+            fill="outline"
+            onClick={() => navigate(`/review?date=${normalizedDate}`)}
+            disabled={!validDate}
+          >
+            去生成题卡
+          </Button>
+        </div>
+      </Card>
+
       <Dialog
         visible={editOpen}
         title={log ? '编辑打卡' : '新增打卡'}

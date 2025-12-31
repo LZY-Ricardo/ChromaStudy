@@ -1,50 +1,44 @@
 import { Button, Card } from 'antd-mobile'
-// import { useEffect, useState } from 'react'
-// import { Input, List, Toast } from 'antd-mobile'
-// import { getUsers, login } from '../services/api.js'
+import { useEffect, useState } from 'react'
+import { Input, List, Toast } from 'antd-mobile'
+import { getUsers, login } from '../services/api.js'
 
 function Login({ onLoggedIn }) {
-  // 简化版：直接进入，无需登录
-  const handleSimpleLogin = () => {
-    onLoggedIn?.({ id: 1, username: 'local_user' })
+  const [username, setUsername] = useState('demo')
+  const [password, setPassword] = useState('demo')
+  const [loading, setLoading] = useState(false)
+  const [users, setUsers] = useState([])
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await getUsers()
+        setUsers(Array.isArray(data) ? data : [])
+      } catch {
+        setUsers([])
+      }
+    }
+    load()
+  }, [])
+
+  const handleLogin = async () => {
+    const u = username.trim()
+    const p = password.trim()
+    if (!u || !p) {
+      Toast.show({ content: '请输入用户名和密码' })
+      return
+    }
+    setLoading(true)
+    try {
+      const profile = await login(u, p)
+      onLoggedIn?.(profile)
+    } catch (error) {
+      const message = error?.response?.data?.error
+      Toast.show({ content: message ? `登录失败：${message}` : '登录失败，请稍后重试' })
+    } finally {
+      setLoading(false)
+    }
   }
-
-  // /* ========== 原登录逻辑（已注释）========== */
-  // const [username, setUsername] = useState('demo')
-  // const [password, setPassword] = useState('demo')
-  // const [loading, setLoading] = useState(false)
-  // const [users, setUsers] = useState([])
-
-  // useEffect(() => {
-  //   const load = async () => {
-  //     try {
-  //       const data = await getUsers()
-  //       setUsers(Array.isArray(data) ? data : [])
-  //     } catch {
-  //       setUsers([])
-  //     }
-  //   }
-  //   load()
-  // }, [])
-
-  // const handleLogin = async () => {
-  //   const u = username.trim()
-  //   const p = password.trim()
-  //   if (!u || !p) {
-  //     Toast.show({ content: '请输入用户名和密码' })
-  //     return
-  //   }
-  //   setLoading(true)
-  //   try {
-  //     const profile = await login(u, p)
-  //     onLoggedIn?.(profile)
-  //   } catch (error) {
-  //     const message = error?.response?.data?.error
-  //     Toast.show({ content: message ? `登录失败：${message}` : '登录失败，请稍后重试' })
-  //   } finally {
-  //     setLoading(false)
-  //   }
-  // }
 
   return (
     <div className="app-shell space-y-4">
@@ -54,65 +48,52 @@ function Login({ onLoggedIn }) {
         <p className="text-sm text-slate-500">本地离线使用，数据存储在浏览器中</p>
       </header>
 
-      {/* 简化版登录卡片 */}
-      <Card title="开始学习" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+      <Card title="登录 / 注册" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
         <div className="space-y-3">
-          <Button block color="primary" size="large" onClick={handleSimpleLogin}>
-            进入应用
+          <Input
+            placeholder="用户名"
+            value={username}
+            onChange={setUsername}
+            clearable
+            disabled={loading}
+          />
+          <Input
+            type="password"
+            placeholder="密码"
+            value={password}
+            onChange={setPassword}
+            clearable
+            disabled={loading}
+          />
+          <Button block color="primary" size="large" loading={loading} onClick={handleLogin}>
+            {loading ? '登录中...' : '进入'}
           </Button>
-          <p className="text-center text-xs text-slate-400">
-            无需登录，点击即可开始使用
+          <p className="text-xs text-slate-400">
+            若用户名不存在会自动创建（明文密码，仅本地自用）。
           </p>
         </div>
       </Card>
 
-      {/* {/* 原登录表单（已注释） */}
-      {/* <Card title="登录 / 注册" className="rounded-2xl border border-slate-100 bg-white shadow-sm"> */}
-      {/*   <div className="space-y-3"> */}
-      {/*     <Input */}
-      {/*       placeholder="用户名" */}
-      {/*       value={username} */}
-      {/*       onChange={setUsername} */}
-      {/*       clearable */}
-      {/*       disabled={loading} */}
-      {/*     /> */}
-      {/*     <Input */}
-      {/*       type="password" */}
-      {/*       placeholder="密码" */}
-      {/*       value={password} */}
-      {/*       onChange={setPassword} */}
-      {/*       clearable */}
-      {/*       disabled={loading} */}
-      {/*     /> */}
-      {/*     <Button block color="primary" size="large" loading={loading} onClick={handleLogin}> */}
-      {/*       {loading ? '登录中...' : '进入'} */}
-      {/*     </Button> */}
-      {/*     <p className="text-xs text-slate-400"> */}
-      {/*       若用户名不存在会自动创建（明文密码，仅本地自用）。 */}
-      {/*     </p> */}
-      {/*   </div> */}
-      {/* </Card> */}
-
-      {/* {users.length > 0 ? ( */}
-      {/*   <Card */}
-      {/*     title="本地已有用户" */}
-      {/*     className="rounded-2xl border border-slate-100 bg-white shadow-sm" */}
-      {/*   > */}
-      {/*     <List> */}
-      {/*       {users.map((user) => ( */}
-      {/*         <List.Item */}
-      {/*           key={user.id} */}
-      {/*           clickable */}
-      {/*           onClick={() => { */}
-      {/*             setUsername(user.username) */}
-      {/*           }} */}
-      {/*         > */}
-      {/*           {user.username} */}
-      {/*         </List.Item> */}
-      {/*       ))} */}
-      {/*     </List> */}
-      {/*   </Card> */}
-      {/* ) : null} */}
+      {users.length > 0 ? (
+        <Card
+          title="本地已有用户"
+          className="rounded-2xl border border-slate-100 bg-white shadow-sm"
+        >
+          <List>
+            {users.map((user) => (
+              <List.Item
+                key={user.id}
+                clickable
+                onClick={() => {
+                  setUsername(user.username)
+                }}
+              >
+                {user.username}
+              </List.Item>
+            ))}
+          </List>
+        </Card>
+      ) : null}
     </div>
   )
 }

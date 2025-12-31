@@ -10,6 +10,7 @@ import Settings from './pages/Settings.jsx'
 import DayDetail from './pages/DayDetail.jsx'
 import Stats from './pages/Stats.jsx'
 import Focus from './pages/Focus.jsx'
+import Review from './pages/Review.jsx'
 import { clearUser, loadUser, saveUser } from './utils/storage.js'
 import { syncPendingOps } from './services/api.js'
 import { getPendingOpsCount } from './utils/syncQueue.js'
@@ -111,7 +112,10 @@ function Shell() {
     )
   }
 
-  const hideTabBar = location.pathname.startsWith('/day/') || location.pathname === '/focus'
+  const hideTabBar =
+    location.pathname.startsWith('/day/') ||
+    location.pathname === '/focus' ||
+    location.pathname.startsWith('/review')
 
   return (
     <div className="app-shell">
@@ -149,6 +153,7 @@ function Shell() {
           />
           <Route path="/day/:date" element={<DayDetail user={user} syncTick={syncTick} />} />
           <Route path="/focus" element={<Focus user={user} syncTick={syncTick} />} />
+          <Route path="/review" element={<Review user={user} syncTick={syncTick} />} />
         </Routes>
       </main>
 

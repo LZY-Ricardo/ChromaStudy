@@ -578,6 +578,11 @@ export async function generateReviewQuestions(userId, date, ai) {
   return data?.questions ?? []
 }
 
+export async function generateFlashcards(userId, date, count, ai) {
+  const { data } = await api.post('/api/ai/flashcards', { userId, date, count, ai })
+  return data?.cards ?? []
+}
+
 export async function generateReport(userId, payload) {
   const { data } = await api.post('/api/ai/report', { userId, ...payload })
   return data

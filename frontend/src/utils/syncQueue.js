@@ -88,6 +88,22 @@ export function updateOpById(id, updates) {
   return updated
 }
 
+export function bumpOpToEnd(id) {
+  if (typeof window === 'undefined') return null
+  if (!id) return null
+
+  const queue = readAll()
+  const index = queue.findIndex((op) => op?.id === id)
+  if (index < 0) return null
+
+  const target = queue[index]
+  const updated = { ...target, createdAt: Date.now() }
+  const next = [...queue.slice(0, index), ...queue.slice(index + 1), updated]
+
+  writeAll(next)
+  return updated
+}
+
 export function replaceQueuedTaskId(userId, tempId, actualId) {
   if (typeof window === 'undefined') return
   const id = Number(userId)

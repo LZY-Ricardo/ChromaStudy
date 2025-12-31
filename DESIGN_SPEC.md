@@ -23,6 +23,7 @@
 - **v0.2 留存**：周目标分钟数 + streak；番茄钟/专注计时并一键生成打卡；周/月统计
 - **v0.3 AI 深度**：AI 任务拆解；打卡后 AI 复盘追问并保存；AI 周报/月报；（可选）检索历史笔记/RAG
 - **v0.4 产品打磨**：导出/备份/恢复；更可靠的通知策略（PWA “尽力提醒” + 可选升级）；离线可写 + 自动同步（L2）
+- **v0.5 复习强化**：基于学习内容生成“题卡”并进行答题复习（SRS 间隔重复 + 自评），可离线使用，复习时长计入周目标
 
 ---
 
@@ -285,3 +286,79 @@
 - streak 口径：`duration > 0` 视为当日已打卡
 - 番茄钟默认：`25/5`
 - Task 排序：手动拖拽优先；无手动顺序时按创建时间/ID 兜底
+- 答题复习：默认每次从学习内容生成 `5` 张题卡
+- 答题复习：复习时长计入周目标（以 `checkin` 的 `mode=increment` 写入 `duration`）
+- 答题复习入口：Today 主入口 + Calendar（Day 详情）次入口
+- 答题复习判分：MVP 不做 AI 判分，采用自评按钮（Again/Hard/Good/Easy）
+
+---
+
+## 11. 答题复习（题卡 + SRS）
+
+### 11.1 目标（MVP）
+- 把“学习内容”沉淀为可复用的题卡，让用户每天花 3~10 分钟做一次答题复习，形成巩固闭环。
+- 可离线复习：题卡与复习进度保存在本地；需要跨设备时通过导出/导入迁移（先不做服务端同步）。
+- 与习惯闭环打通：复习耗时计入当天 `duration`（用于 streak/周目标/统计）。
+
+### 11.2 核心概念
+- **题卡（Card）**：`front`（题目/提示）+ `back`（参考答案/要点），支持手动创建与 AI 从学习内容生成。
+- **复习队列（Due）**：到期（`dueDate <= today`）的题卡集合。
+- **自评（Grade）**：用户在看答案后选择：Again / Hard / Good / Easy，用于更新下次复习时间（SRS）。
+
+### 11.3 SRS 调度算法（SM-2 简化）
+为保证实现简单且可解释，MVP 采用 SM-2（Anki 等常用）：
+- 状态字段：`repetition`（成功次数）、`intervalDays`（间隔天数）、`easeFactor`（难度系数，最小 1.3）、`dueDate`
+- 映射：Again→`q=1`，Hard→`q=3`，Good→`q=4`，Easy→`q=5`
+- 更新规则（伪码）：
+  - 若 `q < 3`：`repetition = 0`，`intervalDays = 1`
+  - 否则：
+    - 若 `repetition == 0`：`intervalDays = 1`
+    - 若 `repetition == 1`：`intervalDays = 6`
+    - 否则：`intervalDays = round(intervalDays * easeFactor)`
+    - `easeFactor = max(1.3, easeFactor + (0.1 - (5-q)*(0.08 + (5-q)*0.02)))`
+    - `repetition += 1`
+  - `dueDate = today + intervalDays`
+
+### 11.4 数据结构（本地存储）
+MVP 以 localStorage/IndexedDB 保存（与导出/导入打通）：
+- `reviewCards[]`（按 `userId` 分 key 存储）：
+  - `id`：uuid
+  - `type`：`short_answer` / `cloze`（MVP 先统一按 Q/A 展示）
+  - `front`：题目
+  - `back`：参考答案/要点
+  - `source`：`{ date?: "YYYY-MM-DD" }`（可追溯到学习日期）
+  - `srs`：`{ repetition, intervalDays, easeFactor, dueDate, lastReviewedAt }`
+  - `createdAt` / `updatedAt`
+
+### 11.5 交互流程（MVP）
+**入口**
+- Today：展示“今日待复习 X 题”，点击进入复习页
+- Calendar → Day 详情：可一键跳转到复习页，并支持“从该日学习内容生成题卡”
+
+**生成题卡**
+- 从学习内容生成（AI）：选择日期（默认 today）→ 点击“生成 5 张”→ 用户可编辑后保存
+- 手动创建：输入 `front/back` 保存
+
+**开始复习**
+- 进入复习模式：按 `dueDate` 取到期题卡（可先默认上限 10 张/组）
+- 卡片流程：显示题目 → “显示答案” → 自评按钮（Again/Hard/Good/Easy）→ 下一题
+- 结束后：自动以 `mode=increment` 写入当天 `duration`（以本次复习时长估算分钟数，至少 1 分钟）
+
+### 11.6 AI 生成题卡（接口建议）
+新增接口（不落库、不保存到数据库）：
+- `POST /api/ai/flashcards`
+  - 入参：`{ userId, date, count=5, ai }`
+  - 出参：`{ date, cards: [{ type, question, answer }] }`
+  - 规则：只输出严格 JSON；题干<=30字，答案<=120字；中文；必须基于当天学习内容
+
+### 11.7 验收标准（MVP）
+- 能从某天学习内容生成并保存题卡（默认 5 张，可编辑）。
+- 复习页能按到期队列出题，支持“显示答案→自评→更新到期日”闭环。
+- 复习结束会把耗时计入当天 `duration`，并在 Stats/Today 的周目标与 streak 中体现。
+- 题卡/进度随导出/导入迁移（不包含云端 API Key）。
+
+### 11.8 开发任务拆分（MVP）
+- 后端：新增 `POST /api/ai/flashcards`（基于 `StudyLog` 内容生成题卡 JSON）
+- 前端：新增 `Review` 页面（题库/草稿编辑/复习模式），实现 SM-2 调度与自评
+- 前端：新增本地存储 `reviewCards`（按 userId 分 key），并在导出/导入中包含
+- 入口：Today 展示“今日待复习 X 题”；Calendar Day 详情提供“去生成题卡”跳转

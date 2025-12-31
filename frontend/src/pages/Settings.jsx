@@ -6,6 +6,7 @@ import {
   clearPendingOps,
   getPendingOps,
   getPendingOpsCount,
+  bumpOpToEnd,
   removeOpsById,
   updateOpById,
 } from '../utils/syncQueue.js'
@@ -30,6 +31,8 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
   const [pendingOpen, setPendingOpen] = useState(false)
   const [detailOp, setDetailOp] = useState(null)
   const [detailDraft, setDetailDraft] = useState(null)
+  const [detailAdvanced, setDetailAdvanced] = useState(false)
+  const [detailPayloadText, setDetailPayloadText] = useState('')
   const [importOpen, setImportOpen] = useState(false)
   const [importCandidate, setImportCandidate] = useState(null)
   const [importOptions, setImportOptions] = useState(null)
@@ -195,18 +198,111 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     if (!op) return
     setDetailOp(op)
     setDetailDraft(makeDetailDraft(op))
+    setDetailAdvanced(false)
+    try {
+      setDetailPayloadText(JSON.stringify(op?.payload ?? {}, null, 2))
+    } catch {
+      setDetailPayloadText('{}')
+    }
   }
 
   const closeOpDetail = () => {
     if (syncing) return
     setDetailOp(null)
     setDetailDraft(null)
+    setDetailAdvanced(false)
+    setDetailPayloadText('')
   }
 
   const buildUpdatedPayload = () => {
     if (!detailOp || !detailDraft) return null
     const type = detailOp.type
     const original = detailOp.payload && typeof detailOp.payload === 'object' ? detailOp.payload : {}
+
+    if (detailAdvanced) {
+      let parsed
+      try {
+        parsed = JSON.parse(String(detailPayloadText || ''))
+      } catch {
+        Toast.show({ content: 'payload JSON 解析失败' })
+        return null
+      }
+
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        Toast.show({ content: 'payload 必须是 JSON 对象' })
+        return null
+      }
+
+      if (type === 'checkin') {
+        const next = { ...parsed, userId: detailOp.userId }
+        const date = typeof next.date === 'string' ? next.date.trim() : ''
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          Toast.show({ content: '日期格式需要为 YYYY-MM-DD' })
+          return null
+        }
+        const mode = next.mode === 'increment' ? 'increment' : 'replace'
+        const minutes = Number.parseInt(String(next.duration ?? ''), 10)
+        if (!Number.isInteger(minutes)) {
+          Toast.show({ content: '时长需要是整数（分钟）' })
+          return null
+        }
+        if (mode === 'increment' && minutes <= 0) {
+          Toast.show({ content: '累计模式下时长必须 > 0' })
+          return null
+        }
+        if (mode === 'replace' && minutes < 0) {
+          Toast.show({ content: '覆盖模式下时长必须 >= 0' })
+          return null
+        }
+        const content = typeof next.content === 'string' ? next.content.trim() : ''
+        if (mode === 'replace' && !content) {
+          Toast.show({ content: '覆盖模式下内容必填' })
+          return null
+        }
+        return { ...next, date, mode, duration: minutes, content }
+      }
+
+      if (type === 'task_create') {
+        const existingTempId = original?.tempId
+        const tempId = Number.isFinite(parsed.tempId)
+          ? parsed.tempId
+          : Number.isFinite(existingTempId)
+            ? existingTempId
+            : NaN
+        const title = typeof parsed.title === 'string' ? parsed.title.trim() : ''
+        if (!Number.isFinite(tempId) || !title) {
+          Toast.show({ content: 'task_create 需要 tempId + title' })
+          return null
+        }
+        return { ...parsed, tempId, title }
+      }
+
+      if (type === 'task_update') {
+        const id = Number.parseInt(String(parsed.id ?? ''), 10)
+        if (!Number.isFinite(id)) {
+          Toast.show({ content: 'task_update.id 需要是整数' })
+          return null
+        }
+        const updates = parsed.updates && typeof parsed.updates === 'object' ? parsed.updates : null
+        if (!updates || Array.isArray(updates) || Object.keys(updates).length === 0) {
+          Toast.show({ content: 'task_update.updates 必须是非空对象' })
+          return null
+        }
+        return { ...parsed, id, updates }
+      }
+
+      if (type === 'task_delete') {
+        const id = Number.parseInt(String(parsed.id ?? ''), 10)
+        if (!Number.isFinite(id)) {
+          Toast.show({ content: 'task_delete.id 需要是整数' })
+          return null
+        }
+        return { ...parsed, id }
+      }
+
+      Toast.show({ content: '暂不支持编辑该类型' })
+      return null
+    }
 
     if (type === 'checkin') {
       const date = String(detailDraft.date ?? '').trim()
@@ -316,6 +412,11 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
 
     setDetailOp(updated)
     setDetailDraft(makeDetailDraft(updated))
+    try {
+      setDetailPayloadText(JSON.stringify(updated?.payload ?? {}, null, 2))
+    } catch {
+      // ignore
+    }
     bumpLocalRender((v) => v + 1)
     Toast.show({ content: '已保存修改' })
 
@@ -323,6 +424,26 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
       closeOpDetail()
       onSyncNow?.()
     }
+  }
+
+  const moveOpToEnd = (op) => {
+    if (!op?.id) return
+    const updated = bumpOpToEnd(op.id)
+    if (!updated) {
+      Toast.show({ content: '移动失败' })
+      return
+    }
+    if (detailOp?.id === updated.id) {
+      setDetailOp(updated)
+      setDetailDraft(makeDetailDraft(updated))
+      try {
+        setDetailPayloadText(JSON.stringify(updated?.payload ?? {}, null, 2))
+      } catch {
+        // ignore
+      }
+    }
+    bumpLocalRender((v) => v + 1)
+    Toast.show({ content: '已移到队列末尾' })
   }
 
   const exportLocalData = () => {
@@ -351,6 +472,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     const taskOrderKey = `chroma_task_order_${userId}`
     const queueKey = 'chroma_sync_queue_v1'
     const reviewPrefix = `chroma_review_${userId}_`
+    const reviewCardsKey = `chroma_review_cards_v1_${userId}`
 
     const reviews = {}
     try {
@@ -363,6 +485,8 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     } catch {
       // ignore
     }
+
+    const reviewCards = safeParse(window.localStorage.getItem(reviewCardsKey))
 
     const rawQueue = safeParse(window.localStorage.getItem(queueKey))
     const scrubAi = (value) => {
@@ -401,6 +525,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
         },
         pendingOps,
         reviews,
+        reviewCards: Array.isArray(reviewCards) ? reviewCards : [],
       },
       notes: {
         openaiApiKeyExported: false,
@@ -457,6 +582,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     const logsCount = Array.isArray(data?.caches?.studyLogs) ? data.caches.studyLogs.length : 0
     const reviewsCount =
       data?.reviews && typeof data.reviews === 'object' ? Object.keys(data.reviews).length : 0
+    const reviewCardsCount = Array.isArray(data?.reviewCards) ? data.reviewCards.length : 0
     const opsCount = Array.isArray(data?.pendingOps) ? data.pendingOps.length : 0
 
     const sameUser = !Number.isFinite(fileUserId) || fileUserId === user.id
@@ -473,6 +599,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
         ? Object.prototype.hasOwnProperty.call(data.caches, 'studyLogs')
         : false
     const hasReviews = data?.reviews && typeof data.reviews === 'object'
+    const hasReviewCards = Object.prototype.hasOwnProperty.call(data, 'reviewCards')
 
     setImportCandidate({
       fileName: file.name,
@@ -484,6 +611,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
         tasksCount,
         logsCount,
         reviewsCount,
+        reviewCardsCount,
         opsCount,
         sameUser,
         hasAiConfig,
@@ -492,6 +620,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
         hasTaskCache,
         hasStudyLogCache,
         hasReviews,
+        hasReviewCards,
       },
     })
 
@@ -502,6 +631,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
       tasksCache: hasTaskCache,
       studyLogsCache: hasStudyLogCache,
       reviews: hasReviews,
+      reviewCards: hasReviewCards,
       pendingOps: sameUser && opsCount > 0,
       pendingOpsMode: 'replace', // replace | merge
     })
@@ -561,6 +691,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
     const weeklyGoalKey = `chroma_weekly_goal_${userId}`
     const taskOrderKey = `chroma_task_order_${userId}`
     const reviewPrefix = `chroma_review_${userId}_`
+    const reviewCardsKey = `chroma_review_cards_v1_${userId}`
 
     setImportWorking(true)
     try {
@@ -615,6 +746,17 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
             if (!date) continue
             setOrRemoveJson(`${reviewPrefix}${date}`, review)
           }
+        }
+      }
+
+      if (importOptions.reviewCards) {
+        const incoming = Object.prototype.hasOwnProperty.call(data, 'reviewCards') ? data.reviewCards : undefined
+        if (incoming === undefined) {
+          // keep existing
+        } else if (incoming === null) {
+          window.localStorage.removeItem(reviewCardsKey)
+        } else {
+          setOrRemoveJson(reviewCardsKey, Array.isArray(incoming) ? incoming : [])
         }
       }
 
@@ -1016,7 +1158,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
             style={{ display: 'none' }}
           />
           <p className="text-xs text-slate-400">
-            导出包含：任务/打卡缓存、复盘、本地设置、待同步队列；默认不导出云端 API Key。导入会覆盖本地数据。
+            导出包含：任务/打卡缓存、复盘、答题复习题卡、本地设置、待同步队列；默认不导出云端 API Key。导入会覆盖本地数据。
           </p>
         </div>
       </Card>
@@ -1053,7 +1195,8 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
                 </p>
                 <p className="mt-1">
                   内容：任务缓存 {importCandidate.meta.tasksCount} · 打卡缓存 {importCandidate.meta.logsCount} · 复盘{' '}
-                  {importCandidate.meta.reviewsCount} · 待同步 {importCandidate.meta.opsCount}
+                  {importCandidate.meta.reviewsCount} · 题卡 {importCandidate.meta.reviewCardsCount} · 待同步{' '}
+                  {importCandidate.meta.opsCount}
                 </p>
                 <p className="mt-2 text-amber-600">
                   提示：导入只覆盖你勾选的模块；云端 API Key 默认保留不覆盖。
@@ -1150,6 +1293,19 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
                 <List.Item
                   extra={
                     <Switch
+                      checked={Boolean(importOptions.reviewCards)}
+                      disabled={!importCandidate.meta.hasReviewCards}
+                      onChange={(value) =>
+                        setImportOptions((prev) => (prev ? { ...prev, reviewCards: value } : prev))
+                      }
+                    />
+                  }
+                >
+                  答题复习题卡（本地）
+                </List.Item>
+                <List.Item
+                  extra={
+                    <Switch
                       checked={Boolean(importOptions.pendingOps)}
                       disabled={importCandidate.meta.opsCount <= 0}
                       onChange={(value) =>
@@ -1215,6 +1371,17 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
                   </Button>
                   <Button size="small" color="primary" onClick={() => onSyncNow?.()} disabled={syncing}>
                     再试一次
+                  </Button>
+                  <Button
+                    size="small"
+                    fill="outline"
+                    disabled={syncing}
+                    onClick={() => {
+                      moveOpToEnd(blockedOp)
+                      onSyncNow?.()
+                    }}
+                  >
+                    跳过阻塞项继续同步
                   </Button>
                 </div>
               </div>
@@ -1282,16 +1449,42 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
           closeOpDetail()
         }}
         content={
-          <div className="space-y-3">
-            <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-              <p className="font-semibold text-slate-800">
-                {formatOpTitle(detailOp)} {formatOpSummary(detailOp)}
-              </p>
-              <p className="mt-1">
-                opId：{detailOp.id}
-                {detailOp?.createdAt ? ` · ${new Date(detailOp.createdAt).toLocaleString()}` : ''}
-              </p>
-            </div>
+          !detailOp ? null : (
+            <div className="space-y-3">
+              <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+                <p className="font-semibold text-slate-800">
+                  {formatOpTitle(detailOp)} {formatOpSummary(detailOp)}
+                </p>
+                <p className="mt-1">
+                  opId：{detailOp.id}
+                  {detailOp?.createdAt ? ` · ${new Date(detailOp.createdAt).toLocaleString()}` : ''}
+                </p>
+              </div>
+
+              <List>
+                <List.Item
+                  extra={
+                    <Switch
+                      checked={detailAdvanced}
+                      disabled={syncing}
+                      onChange={(value) => setDetailAdvanced(Boolean(value))}
+                    />
+                  }
+                >
+                  高级：直接编辑 payload JSON
+                </List.Item>
+              </List>
+
+              {detailAdvanced ? (
+                <TextArea
+                  placeholder="请输入 payload JSON（对象）"
+                  value={detailPayloadText}
+                  onChange={setDetailPayloadText}
+                  rows={8}
+                  showCount
+                  maxLength={4000}
+                />
+              ) : null}
 
             {detailDraft?.type === 'checkin' ? (
               <div className="space-y-3">
@@ -1428,27 +1621,36 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
               </List>
             ) : null}
 
-            <div className="flex items-center gap-2">
-              <Button
-                size="small"
-                fill="outline"
-                color="warning"
-                disabled={syncing}
-                onClick={() => discardOp(detailOp)}
-              >
-                丢弃该条
-              </Button>
-              <Button
-                size="small"
-                fill="outline"
-                color="warning"
-                disabled={syncing}
-                onClick={() => discardOp(detailOp, { syncAfter: true })}
-              >
-                丢弃并继续同步
-              </Button>
-            </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="small"
+                  fill="outline"
+                  disabled={syncing}
+                  onClick={() => moveOpToEnd(detailOp)}
+                >
+                  移到队列末尾
+                </Button>
+                <Button
+                  size="small"
+                  fill="outline"
+                  color="warning"
+                  disabled={syncing}
+                  onClick={() => discardOp(detailOp)}
+                >
+                  丢弃该条
+                </Button>
+                <Button
+                  size="small"
+                  fill="outline"
+                  color="warning"
+                  disabled={syncing}
+                  onClick={() => discardOp(detailOp, { syncAfter: true })}
+                >
+                  丢弃并继续同步
+                </Button>
+              </div>
           </div>
+          )
         }
       />
     </div>

@@ -757,6 +757,115 @@ app.post(
 );
 
 app.post(
+  "/api/ai/flashcards",
+  asyncHandler(async (req, res) => {
+    const { userId, date, count, ai } = req.body || {};
+    const normalizedUserId = Number(userId);
+    const normalizedDate = typeof date === "string" ? date.trim() : "";
+    const requestedCount = Number.parseInt(String(count ?? ""), 10);
+    const cardCount =
+      Number.isFinite(requestedCount) && requestedCount > 0
+        ? Math.min(20, requestedCount)
+        : 5;
+
+    if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+      return res.status(400).json({ error: "userId must be a positive integer" });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+      return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+    }
+
+    const log = await prisma.studyLog.findUnique({
+      where: {
+        userId_date: {
+          userId: normalizedUserId,
+          date: normalizedDate,
+        },
+      },
+    });
+
+    if (!log || !log.duration || log.duration <= 0 || !String(log.content || "").trim()) {
+      return res.status(400).json({ error: "study log is required" });
+    }
+
+    const aiConfig = resolveAiConfig(ai);
+    if (aiConfig.provider === "openai") {
+      const error = validateOpenAiConfig(aiConfig);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+    }
+
+    const prompt = [
+      `日期：${log.date}`,
+      `学习时长：${log.duration} 分钟`,
+      "学习内容：",
+      log.content,
+      "",
+      `请基于学习内容，生成 ${cardCount} 张“题卡”，用于答题复习（间隔重复）。`,
+      "要求：",
+      "- 中文；题干<=30字，答案<=120字；尽量具体可检验，避免太泛的问题",
+      "- 只输出严格 JSON（不要 Markdown/解释）",
+      "输出格式：{\"cards\":[{\"type\":\"short_answer\",\"question\":\"...\",\"answer\":\"...\"}]}",
+    ].join("\n");
+
+    const text = await chatOnce(aiConfig, [
+      {
+        role: "system",
+        content: "你是学习教练。你只输出严格 JSON，不输出其它文本。",
+      },
+      { role: "user", content: prompt },
+    ]);
+
+    const parsed = parseJsonFromText(text);
+    const rawCards = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.cards)
+        ? parsed.cards
+        : null;
+
+    if (!rawCards) {
+      return res.status(502).json({ error: "failed to parse cards" });
+    }
+
+    const normalizeText = (value, maxLen) => {
+      const text = String(value || "").replace(/\s+/g, " ").trim();
+      if (!text) return "";
+      if (text.length <= maxLen) return text;
+      return text.slice(0, maxLen);
+    };
+
+    const cards = rawCards
+      .map((item) => {
+        const obj = item && typeof item === "object" ? item : null;
+        const type =
+          typeof obj?.type === "string" && obj.type.trim()
+            ? obj.type.trim()
+            : "short_answer";
+
+        const question = normalizeText(obj?.question ?? obj?.front ?? obj?.q, 30);
+        const answer = normalizeText(obj?.answer ?? obj?.back ?? obj?.a, 120);
+        if (!question || !answer) return null;
+
+        return {
+          type,
+          question,
+          answer,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, cardCount);
+
+    if (cards.length === 0) {
+      return res.status(502).json({ error: "no cards generated" });
+    }
+
+    return res.json({ date: normalizedDate, cards });
+  })
+);
+
+app.post(
   "/api/ai/report",
   asyncHandler(async (req, res) => {
     const { userId, type, periodStart, periodEnd, ai } = req.body || {};
