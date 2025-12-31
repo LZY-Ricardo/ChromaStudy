@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ActionSheet, TabBar, Toast } from 'antd-mobile'
 import { BarChart3, CalendarDays, Home, MessageCircle, Settings as SettingsIcon } from 'lucide-react'
 import Login from './pages/Login.jsx'
+import Register from './pages/Register.jsx'
 import Today from './pages/Today.jsx'
 import Calendar from './pages/Calendar.jsx'
 import Chat from './pages/Chat.jsx'
@@ -12,16 +13,14 @@ import Stats from './pages/Stats.jsx'
 import Focus from './pages/Focus.jsx'
 import Review from './pages/Review.jsx'
 import {
-  clearUser,
   loadAiConfig,
   loadAiState,
-  loadUser,
-  saveUser,
   setActiveAiProfile,
 } from './utils/storage.js'
-import { syncPendingOps } from './services/api.js'
+import { syncPendingOps, getMe, logout as apiLogout } from './services/api.js'
 import { getPendingOpsCount } from './utils/syncQueue.js'
 import { detectOpenAiCompatPresetId, getOpenAiCompatPreset } from './utils/aiPresets.js'
+import { loadAuthedUser } from './utils/authStorage.js'
 
 const tabs = [
   { key: '/', title: 'Today', icon: <Home size={18} /> },
@@ -31,21 +30,23 @@ const tabs = [
   { key: '/settings', title: 'Settings', icon: <SettingsIcon size={18} /> },
 ]
 
-function Shell() {
+function Shell({ user, onLogout }) {
   const location = useLocation()
   const navigate = useNavigate()
   const activeKey = tabs.find((tab) => tab.key === location.pathname)?.key ?? '/'
-  const [user, setUser] = useState(() => loadUser())
   const [aiState, setAiState] = useState(() => loadAiState())
   const [aiConfig, setAiConfig] = useState(() => loadAiConfig())
   const [syncTick, setSyncTick] = useState(0)
   const [syncing, setSyncing] = useState(false)
   const [lastSync, setLastSync] = useState(null)
 
-  const logout = () => {
-    clearUser()
-    setUser(null)
-  }
+  const logout = useCallback(async () => {
+    try {
+      await onLogout?.()
+    } finally {
+      navigate('/login', { replace: true })
+    }
+  }, [navigate, onLogout])
 
   const runSync = useCallback(
     async (reason = 'manual') => {
@@ -119,17 +120,6 @@ function Shell() {
     window.addEventListener('online', handler)
     return () => window.removeEventListener('online', handler)
   }, [runSync, user?.id])
-
-  if (!user?.id) {
-    return (
-      <Login
-        onLoggedIn={(profile) => {
-          saveUser(profile)
-          setUser(profile)
-        }}
-      />
-    )
-  }
 
   const hideTabBar =
     location.pathname.startsWith('/day/') ||
@@ -278,10 +268,88 @@ function Shell() {
   )
 }
 
+function RequireAuth({ user, children }) {
+  const location = useLocation()
+  if (user?.id) return children
+  return <Navigate to="/login" replace state={{ from: location }} />
+}
+
 function App() {
+  const [user, setUser] = useState(() => loadAuthedUser())
+
+  useEffect(() => {
+    const handler = () => setUser(loadAuthedUser())
+    window.addEventListener('chroma_auth_changed', handler)
+    return () => window.removeEventListener('chroma_auth_changed', handler)
+  }, [])
+
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    const bootstrap = async () => {
+      try {
+        const me = await getMe()
+        if (!cancelled && me?.id) {
+          setUser(me)
+        }
+      } catch {
+        // ignore (interceptor will clear auth on refresh failure)
+      }
+    }
+    bootstrap()
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await apiLogout()
+    } finally {
+      setUser(null)
+    }
+  }, [])
+
   return (
     <BrowserRouter>
-      <Shell />
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            user?.id ? (
+              <Navigate to="/" replace />
+            ) : (
+              <Login
+                onLoggedIn={(profile) => {
+                  setUser(profile)
+                }}
+              />
+            )
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            user?.id ? (
+              <Navigate to="/" replace />
+            ) : (
+              <Register
+                onRegistered={(profile) => {
+                  setUser(profile)
+                }}
+              />
+            )
+          }
+        />
+        <Route
+          path="/*"
+          element={
+            <RequireAuth user={user}>
+              <Shell user={user} onLogout={handleLogout} />
+            </RequireAuth>
+          }
+        />
+      </Routes>
     </BrowserRouter>
   )
 }

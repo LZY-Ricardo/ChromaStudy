@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { enqueueOp, getPendingOps, removeOpsById, replaceQueuedTaskId } from '../utils/syncQueue.js'
 import { replaceTaskIdInOrder } from '../utils/taskOrder.js'
+import { clearAuth, loadAccessToken, loadRefreshToken, saveAuth } from '../utils/authStorage.js'
 
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
 
@@ -8,6 +9,88 @@ const api = axios.create({
   baseURL: apiBaseUrl,
   timeout: 15000,
 })
+
+let refreshPromise = null
+
+function applyAuthPayload(payload) {
+  const user = payload?.user && typeof payload.user === 'object' ? payload.user : null
+  const accessToken = typeof payload?.accessToken === 'string' ? payload.accessToken : ''
+  const refreshToken = typeof payload?.refreshToken === 'string' ? payload.refreshToken : ''
+
+  if (user && accessToken && refreshToken) {
+    saveAuth({ user, accessToken, refreshToken })
+    return { user, accessToken, refreshToken }
+  }
+  return null
+}
+
+async function refreshSession() {
+  const refreshToken = loadRefreshToken()
+  if (!refreshToken) {
+    throw new Error('missing refresh token')
+  }
+
+  const { data } = await api.post(
+    '/api/refresh',
+    { refreshToken },
+    { skipAuthRefresh: true }
+  )
+
+  const applied = applyAuthPayload(data)
+  if (!applied?.accessToken) {
+    throw new Error('refresh failed')
+  }
+  return applied
+}
+
+api.interceptors.request.use(
+  (config) => {
+    const token = loadAccessToken()
+    if (token) {
+      config.headers = config.headers || {}
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => Promise.reject(error)
+)
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const status = error?.response?.status
+    const original = error?.config
+
+    if (status !== 401 || !original || original.skipAuthRefresh) {
+      return Promise.reject(error)
+    }
+
+    if (original._retry) {
+      return Promise.reject(error)
+    }
+    original._retry = true
+
+    try {
+      if (!loadRefreshToken()) {
+        return Promise.reject(error)
+      }
+      if (!refreshPromise) {
+        refreshPromise = refreshSession().finally(() => {
+          refreshPromise = null
+        })
+      }
+      const refreshed = await refreshPromise
+      original.headers = original.headers || {}
+      original.headers.Authorization = `Bearer ${refreshed.accessToken}`
+      return api(original)
+    } catch (refreshError) {
+      if (refreshError?.response?.status === 401) {
+        clearAuth()
+      }
+      return Promise.reject(error)
+    }
+  }
+)
 
 function opId() {
   if (typeof crypto !== 'undefined' && crypto?.randomUUID) {
@@ -124,13 +207,37 @@ function replaceTaskInCache(userId, tempId, task) {
 }
 
 export async function login(username, password) {
-  const { data } = await api.post('/api/login', { username, password })
-  return data.user
+  const { data } = await api.post('/api/login', { username, password }, { skipAuthRefresh: true })
+  const applied = applyAuthPayload(data)
+  if (!applied?.user) {
+    throw new Error('invalid login response')
+  }
+  return applied.user
 }
 
-export async function getUsers() {
-  const { data } = await api.get('/api/users')
-  return data
+export async function register(username, password) {
+  const { data } = await api.post('/api/register', { username, password }, { skipAuthRefresh: true })
+  const applied = applyAuthPayload(data)
+  if (!applied?.user) {
+    throw new Error('invalid register response')
+  }
+  return applied.user
+}
+
+export async function logout() {
+  const refreshToken = loadRefreshToken()
+  try {
+    if (refreshToken) {
+      await api.post('/api/logout', { refreshToken }, { skipAuthRefresh: true })
+    }
+  } finally {
+    clearAuth()
+  }
+}
+
+export async function getMe() {
+  const { data } = await api.get('/api/me')
+  return data?.user || null
 }
 
 export async function getStudyLogs(userId) {

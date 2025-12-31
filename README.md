@@ -22,6 +22,28 @@ pnpm dev
 
 默认监听 `http://localhost:5173`。
 
+## 认证（JWT）
+
+前端提供独立页面：
+
+- `GET /login`：登录
+- `GET /register`：注册
+
+后端认证接口：
+
+- `POST /api/register`：注册并返回 `accessToken/refreshToken`
+- `POST /api/login`：登录并返回 `accessToken/refreshToken`
+- `POST /api/refresh`：使用 `refreshToken` 轮换刷新
+- `POST /api/logout`：撤销 `refreshToken`
+- `GET /api/me`：获取当前登录用户
+
+Token 传递方式：
+
+- `accessToken`：前端通过 `Authorization: Bearer <token>` 访问受保护 API
+- 过期处理：收到 `401` 时前端会自动调用 `/api/refresh` 刷新并重试请求
+
+可配置项：参考 `backend/.env.example`
+
 ## AI Provider 配置（Settings）
 
 - **Ollama（本地）**

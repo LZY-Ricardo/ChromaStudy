@@ -1,10 +1,13 @@
 const path = require("path");
 const http = require("http");
+const crypto = require("crypto");
 
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const express = require("express");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
 const { prisma } = require("./prismaClient");
 const { rrulestr } = require("rrule");
 const { CronJob } = require("cron");
@@ -23,6 +26,14 @@ const OCCURRENCE_LOOKAHEAD_DAYS = 90;
 const REMINDER_LOOKAHEAD_DAYS = 30;
 const DONE_RETENTION_DAYS = 30;
 
+const JWT_ISSUER = process.env.JWT_ISSUER || "chroma-study";
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE || "chroma-study-api";
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "dev-access-secret-change-me";
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "dev-refresh-secret-change-me";
+const ACCESS_TOKEN_TTL = process.env.ACCESS_TOKEN_TTL || "15m";
+const REFRESH_TOKEN_TTL = process.env.REFRESH_TOKEN_TTL || "30d";
+const BCRYPT_COST = Number(process.env.BCRYPT_COST) || 10;
+
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || "";
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "";
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:admin@example.com";
@@ -32,6 +43,12 @@ const PUSH_TTL_SECONDS = 60 * 60;
 
 if (PUSH_READY) {
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
+
+if (!process.env.JWT_ACCESS_SECRET || !process.env.JWT_REFRESH_SECRET) {
+  console.warn(
+    "[AUTH] JWT_ACCESS_SECRET/JWT_REFRESH_SECRET are not set. Using built-in dev defaults; do NOT use in production."
+  );
 }
 
 function normalizeBaseUrl(value) {
@@ -906,48 +923,389 @@ function asyncHandler(handler) {
   };
 }
 
+function looksLikeBcryptHash(value) {
+  return typeof value === "string" && /^\$2[aby]\$/.test(value);
+}
+
+async function hashPassword(password) {
+  return bcrypt.hash(String(password), BCRYPT_COST);
+}
+
+async function verifyPassword(password, storedHashOrPlain) {
+  const stored = String(storedHashOrPlain || "");
+  if (looksLikeBcryptHash(stored)) {
+    return bcrypt.compare(String(password), stored);
+  }
+  return String(password) === stored;
+}
+
+function normalizeUsername(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizePassword(value) {
+  return typeof value === "string" ? value : "";
+}
+
+function generateTokenId() {
+  if (typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return crypto.randomBytes(16).toString("hex");
+}
+
+function signAccessToken(user) {
+  return jwt.sign(
+    { type: "access", username: user.username },
+    JWT_ACCESS_SECRET,
+    {
+      algorithm: "HS256",
+      expiresIn: ACCESS_TOKEN_TTL,
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
+      subject: String(user.id),
+    }
+  );
+}
+
+function signRefreshToken(user, tokenId) {
+  return jwt.sign({ type: "refresh" }, JWT_REFRESH_SECRET, {
+    algorithm: "HS256",
+    expiresIn: REFRESH_TOKEN_TTL,
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+    subject: String(user.id),
+    jwtid: tokenId,
+  });
+}
+
+function createTokenPair(user) {
+  const tokenId = generateTokenId();
+  const accessToken = signAccessToken(user);
+  const refreshToken = signRefreshToken(user, tokenId);
+
+  const decoded = jwt.decode(refreshToken);
+  const expSeconds = Number(decoded?.exp) || 0;
+  const refreshExpiresAt = expSeconds ? new Date(expSeconds * 1000) : new Date(Date.now() + 30 * 86400 * 1000);
+
+  return { accessToken, refreshToken, refreshTokenId: tokenId, refreshExpiresAt };
+}
+
+function extractBearerToken(value) {
+  if (typeof value !== "string") return "";
+  const match = value.match(/^Bearer\s+(.+)$/i);
+  return match ? String(match[1] || "").trim() : "";
+}
+
+function requireAccessToken(req, res, next) {
+  const token = extractBearerToken(req.headers?.authorization);
+  if (!token) {
+    return res.status(401).json({ error: "missing access token", code: "MISSING_ACCESS_TOKEN" });
+  }
+
+  try {
+    const payload = jwt.verify(token, JWT_ACCESS_SECRET, {
+      algorithms: ["HS256"],
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
+    });
+
+    if (payload?.type !== "access") {
+      return res.status(401).json({ error: "invalid token type", code: "INVALID_ACCESS_TOKEN" });
+    }
+
+    const subject = typeof payload?.sub === "string" ? payload.sub : "";
+    const userId = Number(subject);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({ error: "invalid token subject", code: "INVALID_ACCESS_TOKEN" });
+    }
+
+    req.auth = {
+      userId,
+      username: typeof payload?.username === "string" ? payload.username : "",
+    };
+
+    return next();
+  } catch (error) {
+    if (error?.name === "TokenExpiredError") {
+      return res.status(401).json({ error: "access token expired", code: "ACCESS_TOKEN_EXPIRED" });
+    }
+    if (error?.name === "JsonWebTokenError") {
+      return res.status(401).json({ error: "invalid access token", code: "INVALID_ACCESS_TOKEN" });
+    }
+    return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
+  }
+}
+
+function ensureUserIdConsistency(req, res, next) {
+  const authUserId = Number(req.auth?.userId);
+  if (!Number.isInteger(authUserId) || authUserId <= 0) {
+    return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
+  }
+
+  const candidates = [];
+  if (req.query && Object.prototype.hasOwnProperty.call(req.query, "userId")) {
+    candidates.push(Number(req.query.userId));
+  }
+  if (req.body && typeof req.body === "object" && Object.prototype.hasOwnProperty.call(req.body, "userId")) {
+    candidates.push(Number(req.body.userId));
+  }
+
+  if (candidates.some((id) => Number.isInteger(id) && id > 0 && id !== authUserId)) {
+    return res.status(403).json({ error: "forbidden", code: "USER_MISMATCH" });
+  }
+
+  return next();
+}
+
+const PUBLIC_API_PATHS = new Set([
+  "/api/health",
+  "/api/login",
+  "/api/register",
+  "/api/refresh",
+  "/api/logout",
+  "/api/push/vapid-public-key",
+]);
+
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") {
+    return next();
+  }
+  if (!req.path.startsWith("/api/")) {
+    return next();
+  }
+  if (PUBLIC_API_PATHS.has(req.path)) {
+    return next();
+  }
+  return requireAccessToken(req, res, () => ensureUserIdConsistency(req, res, next));
+});
+
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get(
-  "/api/users",
+app.post(
+  "/api/register",
   asyncHandler(async (req, res) => {
-    const users = await prisma.user.findMany({
-      select: { id: true, username: true },
-      orderBy: { id: "asc" },
+    const username = normalizeUsername(req.body?.username);
+    const password = normalizePassword(req.body?.password);
+
+    if (!username || !password) {
+      return res.status(400).json({ error: "username and password are required" });
+    }
+
+    if (username.length < 3 || username.length > 32) {
+      return res.status(400).json({ error: "username must be 3-32 characters" });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: "password must be at least 6 characters" });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { username } });
+    if (existing) {
+      return res.status(409).json({ error: "username already exists" });
+    }
+
+    const created = await prisma.user.create({
+      data: { username, password: await hashPassword(password) },
     });
 
-    return res.json(users);
+    const user = { id: created.id, username: created.username };
+    const tokens = createTokenPair(user);
+
+    await prisma.refreshToken.create({
+      data: {
+        tokenId: tokens.refreshTokenId,
+        userId: user.id,
+        expiresAt: tokens.refreshExpiresAt,
+      },
+    });
+
+    return res.status(201).json({
+      user,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    });
   })
 );
 
 app.post(
   "/api/login",
   asyncHandler(async (req, res) => {
-    const { username, password } = req.body || {};
+    const username = normalizeUsername(req.body?.username);
+    const password = normalizePassword(req.body?.password);
 
     if (!username || !password) {
       return res.status(400).json({ error: "username and password are required" });
     }
 
-    const existing = await prisma.user.findUnique({
-      where: { username },
-    });
-
-    if (existing) {
-      if (existing.password !== password) {
-        return res.status(401).json({ error: "invalid credentials" });
-      }
-
-      return res.json({ user: { id: existing.id, username: existing.username } });
+    const existing = await prisma.user.findUnique({ where: { username } });
+    if (!existing) {
+      return res.status(401).json({ error: "invalid credentials" });
     }
 
-    const created = await prisma.user.create({
-      data: { username, password },
+    const ok = await verifyPassword(password, existing.password);
+    if (!ok) {
+      return res.status(401).json({ error: "invalid credentials" });
+    }
+
+    if (!looksLikeBcryptHash(existing.password)) {
+      prisma.user
+        .update({
+          where: { id: existing.id },
+          data: { password: await hashPassword(password) },
+        })
+        .catch(() => {});
+    }
+
+    const user = { id: existing.id, username: existing.username };
+    const tokens = createTokenPair(user);
+
+    await prisma.refreshToken.create({
+      data: {
+        tokenId: tokens.refreshTokenId,
+        userId: user.id,
+        expiresAt: tokens.refreshExpiresAt,
+      },
     });
 
-    return res.json({ user: { id: created.id, username: created.username } });
+    return res.json({
+      user,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    });
+  })
+);
+
+app.post(
+  "/api/refresh",
+  asyncHandler(async (req, res) => {
+    const refreshToken = typeof req.body?.refreshToken === "string" ? req.body.refreshToken.trim() : "";
+    if (!refreshToken) {
+      return res.status(400).json({ error: "refreshToken is required" });
+    }
+
+    let payload;
+    try {
+      payload = jwt.verify(refreshToken, JWT_REFRESH_SECRET, {
+        algorithms: ["HS256"],
+        issuer: JWT_ISSUER,
+        audience: JWT_AUDIENCE,
+      });
+    } catch (error) {
+      if (error?.name === "TokenExpiredError") {
+        return res.status(401).json({ error: "refresh token expired", code: "REFRESH_TOKEN_EXPIRED" });
+      }
+      return res.status(401).json({ error: "invalid refresh token", code: "INVALID_REFRESH_TOKEN" });
+    }
+
+    if (payload?.type !== "refresh") {
+      return res.status(401).json({ error: "invalid token type", code: "INVALID_REFRESH_TOKEN" });
+    }
+
+    const subject = typeof payload?.sub === "string" ? payload.sub : "";
+    const userId = Number(subject);
+    const tokenId = typeof payload?.jti === "string" ? payload.jti : "";
+
+    if (!Number.isInteger(userId) || userId <= 0 || !tokenId) {
+      return res.status(401).json({ error: "invalid refresh token", code: "INVALID_REFRESH_TOKEN" });
+    }
+
+    const record = await prisma.refreshToken.findUnique({ where: { tokenId } });
+    if (!record || record.userId !== userId) {
+      return res.status(401).json({ error: "invalid refresh token", code: "INVALID_REFRESH_TOKEN" });
+    }
+    if (record.revokedAt) {
+      return res.status(401).json({ error: "refresh token revoked", code: "REFRESH_TOKEN_REVOKED" });
+    }
+    if (record.expiresAt && record.expiresAt.getTime() <= Date.now()) {
+      return res.status(401).json({ error: "refresh token expired", code: "REFRESH_TOKEN_EXPIRED" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, username: true },
+    });
+    if (!user) {
+      return res.status(401).json({ error: "invalid refresh token", code: "INVALID_REFRESH_TOKEN" });
+    }
+
+    const next = createTokenPair(user);
+
+    await prisma.$transaction([
+      prisma.refreshToken.update({
+        where: { tokenId },
+        data: {
+          revokedAt: new Date(),
+          replacedByTokenId: next.refreshTokenId,
+        },
+      }),
+      prisma.refreshToken.create({
+        data: {
+          tokenId: next.refreshTokenId,
+          userId,
+          expiresAt: next.refreshExpiresAt,
+        },
+      }),
+    ]);
+
+    return res.json({
+      user,
+      accessToken: next.accessToken,
+      refreshToken: next.refreshToken,
+    });
+  })
+);
+
+app.post(
+  "/api/logout",
+  asyncHandler(async (req, res) => {
+    const refreshToken = typeof req.body?.refreshToken === "string" ? req.body.refreshToken.trim() : "";
+    if (!refreshToken) {
+      return res.json({ ok: true });
+    }
+
+    try {
+      const payload = jwt.verify(refreshToken, JWT_REFRESH_SECRET, {
+        algorithms: ["HS256"],
+        issuer: JWT_ISSUER,
+        audience: JWT_AUDIENCE,
+      });
+
+      const tokenId = typeof payload?.jti === "string" ? payload.jti : "";
+      if (tokenId) {
+        await prisma.refreshToken.updateMany({
+          where: { tokenId },
+          data: { revokedAt: new Date() },
+        });
+      }
+    } catch {
+      // ignore invalid refresh tokens
+    }
+
+    return res.json({ ok: true });
+  })
+);
+
+app.get(
+  "/api/me",
+  asyncHandler(async (req, res) => {
+    const userId = Number(req.auth?.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, username: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "user not found" });
+    }
+
+    return res.json({ user });
   })
 );
 
@@ -955,7 +1313,6 @@ app.post(
   "/api/checkin",
   asyncHandler(async (req, res) => {
     const {
-      userId,
       date,
       duration,
       content,
@@ -963,7 +1320,7 @@ app.post(
       mode,
       generateFeedback: generateFeedbackOption,
     } = req.body || {};
-    const normalizedUserId = Number(userId);
+    const normalizedUserId = Number(req.auth?.userId);
     const normalizedDuration = Number.parseInt(String(duration), 10);
     const logDate = date || toDateString();
     const aiConfig = resolveAiConfig(ai);
@@ -974,7 +1331,7 @@ app.post(
         : operationMode === "replace";
 
     if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     if (!Number.isInteger(normalizedDuration)) {
@@ -1104,11 +1461,11 @@ app.post(
 app.get(
   "/api/study-logs/:date",
   asyncHandler(async (req, res) => {
-    const userId = Number(req.query.userId);
+    const userId = Number(req.auth?.userId);
     const date = String(req.params.date || "").trim();
 
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -1131,12 +1488,12 @@ app.get(
 app.post(
   "/api/study-logs/:date/ai-feedback",
   asyncHandler(async (req, res) => {
-    const userId = Number(req.body?.userId);
+    const userId = Number(req.auth?.userId);
     const date = String(req.params.date || "").trim();
     const aiConfig = resolveAiConfig(req.body?.ai);
 
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -1187,12 +1544,12 @@ app.post(
 app.get(
   "/api/study-logs",
   asyncHandler(async (req, res) => {
-    const userId = Number(req.query.userId);
+    const userId = Number(req.auth?.userId);
     const from = typeof req.query.from === "string" ? req.query.from.trim() : "";
     const to = typeof req.query.to === "string" ? req.query.to.trim() : "";
 
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) {
@@ -1226,9 +1583,9 @@ app.get(
 app.get(
   "/api/tasks",
   asyncHandler(async (req, res) => {
-    const userId = Number(req.query.userId);
+    const userId = Number(req.auth?.userId);
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     const tasks = await prisma.task.findMany({
@@ -1243,12 +1600,12 @@ app.get(
 app.get(
   "/api/task-occurrences",
   asyncHandler(async (req, res) => {
-    const userId = Number(req.query.userId);
+    const userId = Number(req.auth?.userId);
     const start = typeof req.query.start === "string" ? req.query.start.trim() : "";
     const end = typeof req.query.end === "string" ? req.query.end.trim() : "";
 
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     if (start && !isValidDateString(start)) {
@@ -1327,7 +1684,7 @@ app.post(
   "/api/push/subscribe",
   asyncHandler(async (req, res) => {
     const payload = req.body || {};
-    const userId = Number(payload.userId);
+    const userId = Number(req.auth?.userId);
     const subscription = payload.subscription || {};
     const endpoint = typeof subscription.endpoint === "string" ? subscription.endpoint.trim() : "";
     const keys = subscription.keys || {};
@@ -1336,7 +1693,7 @@ app.post(
       return res.status(500).json({ error: "push is not configured" });
     }
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
     if (!endpoint || typeof keys?.p256dh !== "string" || typeof keys?.auth !== "string") {
       return res.status(400).json({ error: "invalid subscription" });
@@ -1368,7 +1725,7 @@ app.post(
   "/api/push/unsubscribe",
   asyncHandler(async (req, res) => {
     const payload = req.body || {};
-    const userId = Number(payload.userId);
+    const userId = Number(req.auth?.userId);
     const endpoint =
       typeof payload.endpoint === "string"
         ? payload.endpoint.trim()
@@ -1377,7 +1734,7 @@ app.post(
           : "";
 
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
     if (!endpoint) {
       return res.status(400).json({ error: "endpoint is required" });
@@ -1395,10 +1752,10 @@ app.post(
   "/api/tasks",
   asyncHandler(async (req, res) => {
     const payload = req.body || {};
-    const normalizedUserId = Number(payload.userId);
+    const normalizedUserId = Number(req.auth?.userId);
 
     if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     // 验证 plannedDate 格式（如果提供）
@@ -1442,10 +1799,15 @@ app.patch(
   "/api/tasks/:id",
   asyncHandler(async (req, res) => {
     const taskId = Number(req.params.id);
+    const userId = Number(req.auth?.userId);
     const payload = req.body || {};
 
     if (!Number.isInteger(taskId) || taskId <= 0) {
       return res.status(400).json({ error: "id must be a positive integer" });
+    }
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     const normalized = normalizeTaskPayload(payload);
@@ -1463,7 +1825,7 @@ app.patch(
 
     const hasField = (key) => Object.prototype.hasOwnProperty.call(payload, key);
     const existing = await prisma.task.findUnique({ where: { id: taskId } });
-    if (!existing) {
+    if (!existing || existing.userId !== userId) {
       return res.status(404).json({ error: "task not found" });
     }
 
@@ -1514,7 +1876,7 @@ app.patch(
   "/api/task-occurrences",
   asyncHandler(async (req, res) => {
     const payload = req.body || {};
-    const userId = Number(payload.userId);
+    const userId = Number(req.auth?.userId);
     const taskId = Number(payload.taskId);
     const occurrenceDate =
       typeof payload.occurrenceDate === "string" ? payload.occurrenceDate.trim() : "";
@@ -1522,7 +1884,7 @@ app.patch(
       payload.updates && typeof payload.updates === "object" ? payload.updates : null;
 
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
     if (!Number.isInteger(taskId) || taskId <= 0) {
       return res.status(400).json({ error: "taskId must be a positive integer" });
@@ -1651,14 +2013,14 @@ app.delete(
   "/api/tasks/:id",
   asyncHandler(async (req, res) => {
     const taskId = Number(req.params.id);
-    const userId = Number(req.query.userId);
+    const userId = Number(req.auth?.userId);
 
     if (!Number.isInteger(taskId) || taskId <= 0) {
       return res.status(400).json({ error: "id must be a positive integer" });
     }
 
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     const task = await prisma.task.findUnique({ where: { id: taskId } });
@@ -1796,12 +2158,12 @@ app.post(
 app.post(
   "/api/ai/review",
   asyncHandler(async (req, res) => {
-    const { userId, date, ai } = req.body || {};
-    const normalizedUserId = Number(userId);
+    const { date, ai } = req.body || {};
+    const normalizedUserId = Number(req.auth?.userId);
     const normalizedDate = typeof date === "string" ? date.trim() : "";
 
     if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
@@ -1869,8 +2231,8 @@ app.post(
 app.post(
   "/api/ai/flashcards",
   asyncHandler(async (req, res) => {
-    const { userId, date, count, ai } = req.body || {};
-    const normalizedUserId = Number(userId);
+    const { date, count, ai } = req.body || {};
+    const normalizedUserId = Number(req.auth?.userId);
     const normalizedDate = typeof date === "string" ? date.trim() : "";
     const requestedCount = Number.parseInt(String(count ?? ""), 10);
     const cardCount =
@@ -1879,7 +2241,7 @@ app.post(
         : 5;
 
     if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
@@ -1978,14 +2340,14 @@ app.post(
 app.post(
   "/api/ai/report",
   asyncHandler(async (req, res) => {
-    const { userId, type, periodStart, periodEnd, ai } = req.body || {};
-    const normalizedUserId = Number(userId);
+    const { type, periodStart, periodEnd, ai } = req.body || {};
+    const normalizedUserId = Number(req.auth?.userId);
     const reportType = type === "monthly" ? "monthly" : "weekly";
     const start = typeof periodStart === "string" ? periodStart.trim() : "";
     const end = typeof periodEnd === "string" ? periodEnd.trim() : "";
 
     if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
-      return res.status(400).json({ error: "userId must be a positive integer" });
+      return res.status(401).json({ error: "unauthorized", code: "UNAUTHORIZED" });
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {

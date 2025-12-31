@@ -1,25 +1,13 @@
-import { Button, Card } from 'antd-mobile'
-import { useEffect, useState } from 'react'
-import { Input, List, Toast } from 'antd-mobile'
-import { getUsers, login } from '../services/api.js'
+import { Button, Card, Input, Toast } from 'antd-mobile'
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { login } from '../services/api.js'
 
 function Login({ onLoggedIn }) {
-  const [username, setUsername] = useState('demo')
-  const [password, setPassword] = useState('demo')
+  const navigate = useNavigate()
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [users, setUsers] = useState([])
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const data = await getUsers()
-        setUsers(Array.isArray(data) ? data : [])
-      } catch {
-        setUsers([])
-      }
-    }
-    load()
-  }, [])
 
   const handleLogin = async () => {
     const u = username.trim()
@@ -48,7 +36,7 @@ function Login({ onLoggedIn }) {
         <p className="text-sm text-slate-500">本地离线使用，数据存储在浏览器中</p>
       </header>
 
-      <Card title="登录 / 注册" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+      <Card title="登录" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
         <div className="space-y-3">
           <Input
             placeholder="用户名"
@@ -68,35 +56,21 @@ function Login({ onLoggedIn }) {
           <Button block color="primary" size="large" loading={loading} onClick={handleLogin}>
             {loading ? '登录中...' : '进入'}
           </Button>
-          <p className="text-xs text-slate-400">
-            若用户名不存在会自动创建（明文密码，仅本地自用）。
-          </p>
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span>没有账号？</span>
+            <button
+              type="button"
+              className="text-sky-600"
+              onClick={() => navigate('/register')}
+              disabled={loading}
+            >
+              去注册
+            </button>
+          </div>
         </div>
       </Card>
-
-      {users.length > 0 ? (
-        <Card
-          title="本地已有用户"
-          className="rounded-2xl border border-slate-100 bg-white shadow-sm"
-        >
-          <List>
-            {users.map((user) => (
-              <List.Item
-                key={user.id}
-                clickable
-                onClick={() => {
-                  setUsername(user.username)
-                }}
-              >
-                {user.username}
-              </List.Item>
-            ))}
-          </List>
-        </Card>
-      ) : null}
     </div>
   )
 }
 
 export default Login
-

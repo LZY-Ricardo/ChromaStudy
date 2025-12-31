@@ -16,6 +16,21 @@ model User {
   studyLogs         StudyLog[]
   tasks             Task[]
   pushSubscriptions PushSubscription[]
+  refreshTokens     RefreshToken[]
+}
+
+model RefreshToken {
+  id                 Int      @id @default(autoincrement())
+  tokenId            String   @unique
+  userId             Int
+  createdAt          DateTime @default(now())
+  expiresAt          DateTime
+  revokedAt          DateTime?
+  replacedByTokenId  String?
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model StudyLog {
