@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ActionSheet, TabBar, Toast } from 'antd-mobile'
 import { BarChart3, CalendarDays, Home, MessageCircle, Settings as SettingsIcon } from 'lucide-react'
@@ -38,6 +38,7 @@ function Shell({ user, onLogout }) {
   const [aiConfig, setAiConfig] = useState(() => loadAiConfig())
   const [syncTick, setSyncTick] = useState(0)
   const [syncing, setSyncing] = useState(false)
+  const syncingRef = useRef(false)
   const [lastSync, setLastSync] = useState(null)
 
   const logout = useCallback(async () => {
@@ -50,10 +51,11 @@ function Shell({ user, onLogout }) {
 
   const runSync = useCallback(
     async (reason = 'manual') => {
-      if (!user?.id) return null
-      if (syncing) return null
+      const userId = user?.id
+      if (!userId) return null
+      if (syncingRef.current) return null
 
-      const pending = getPendingOpsCount(user.id)
+      const pending = getPendingOpsCount(userId)
       if (pending === 0 && reason !== 'startup') {
         return {
           ok: true,
@@ -66,9 +68,10 @@ function Shell({ user, onLogout }) {
         }
       }
 
+      syncingRef.current = true
       setSyncing(true)
       try {
-        const result = await syncPendingOps(user.id)
+        const result = await syncPendingOps(userId)
         setLastSync({ at: Date.now(), ...result })
 
         if (result.succeeded > 0) {
@@ -94,10 +97,11 @@ function Shell({ user, onLogout }) {
         Toast.show({ content: '同步失败，请稍后重试' })
         return null
       } finally {
+        syncingRef.current = false
         setSyncing(false)
       }
     },
-    [syncing, user]
+    [user?.id]
   )
 
   useEffect(() => {

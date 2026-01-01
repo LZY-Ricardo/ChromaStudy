@@ -1629,7 +1629,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
 
       {/* AI Provider Card - Bento Style */}
       <Card className="bento-card">
-        <div className="flex items-center gap-2 p-3 pb-2">
+        <div className="flex items-center gap-2 px-3 pb-2">
           <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
             <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -1640,38 +1640,42 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
         <div className="space-y-4">
           {/* Profile Section */}
           <div className="space-y-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 px-3">
               配置档案
             </div>
-            <Selector
-              options={aiState.profiles.map((p) => ({ label: p.name || p.id, value: p.id }))}
-              value={[aiState.activeProfileId]}
-              onChange={(values) => switchProfile(values[0])}
-            />
-            <div className="grid grid-cols-4 gap-2">
-              <Button size="mini" fill="outline" onClick={createProfile} className="!rounded-full">
-                新建
-              </Button>
-              <Button size="mini" fill="outline" onClick={duplicateProfile} className="!rounded-full">
-                复制
-              </Button>
-              <Button size="mini" fill="outline" onClick={renameProfile} className="!rounded-full">
-                重命名
-              </Button>
-              <Button
-                size="mini"
-                color="danger"
-                fill="outline"
-                disabled={aiState.profiles.length <= 1}
-                onClick={removeProfile}
-                className="!rounded-full"
-              >
-                删除
-              </Button>
+            <div className="px-3">
+              <Selector
+                options={aiState.profiles.map((p) => ({ label: p.name || p.id, value: p.id }))}
+                value={[aiState.activeProfileId]}
+                onChange={(values) => switchProfile(values[0])}
+              />
+            </div>
+            <div className="px-3">
+              <div className="grid grid-cols-4 gap-2">
+                <Button size="mini" fill="outline" onClick={createProfile} className="!rounded-full">
+                  新建
+                </Button>
+                <Button size="mini" fill="outline" onClick={duplicateProfile} className="!rounded-full">
+                  复制
+                </Button>
+                <Button size="mini" fill="outline" onClick={renameProfile} className="!rounded-full">
+                  重命名
+                </Button>
+                <Button
+                  size="mini"
+                  color="danger"
+                  fill="outline"
+                  disabled={aiState.profiles.length <= 1}
+                  onClick={removeProfile}
+                  className="!rounded-full"
+                >
+                  删除
+                </Button>
+              </div>
             </div>
             <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium ${
               activeProfile?.health?.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-            }`}>
+            }`} style={{ marginLeft: '12px' }}>
               <span className={`w-1.5 h-1.5 rounded-full ${activeProfile?.health?.ok ? 'bg-emerald-500' : 'bg-rose-500'}`} />
               最近测试：{activeProfile?.health?.at
                 ? `${activeProfile.health.ok ? '通过' : '失败'} · ${(() => {
@@ -1690,90 +1694,100 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
 
           {/* Provider Section */}
           <div className="space-y-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 px-3">
               Provider
             </div>
-            <SegmentedControl
-              options={[
-                { label: '本地 Ollama', value: 'ollama' },
-                { label: '云端（OpenAI 兼容）', value: 'openai' },
-              ]}
-              value={provider}
-              onChange={(next) => setProvider(next ?? 'ollama')}
-            />
+            <div className="px-3">
+              <SegmentedControl
+                options={[
+                  { label: '本地 Ollama', value: 'ollama' },
+                  { label: '云端（OpenAI 兼容）', value: 'openai' },
+                ]}
+                value={provider}
+                onChange={(next) => setProvider(next ?? 'ollama')}
+              />
+            </div>
           </div>
 
           {/* Provider Specific Settings */}
           {provider === 'openai' ? (
             <div className="space-y-3">
-              <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+              <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 px-3">
                 Cloud Preset
               </div>
-              <Selector
-                options={openAiCompatPresets.map((item) => ({ label: item.label, value: item.id }))}
-                value={[openaiPresetId]}
-                onChange={(values) => applyOpenaiPreset(values[0] ?? 'openai')}
-              />
-              {openaiPreset?.links?.home || openaiPreset?.links?.console || openaiPreset?.links?.docs ? (
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                  {openaiPreset?.links?.home ? (
-                    <a
-                      className="text-violet-600 hover:text-violet-700 transition-colors"
-                      href={openaiPreset.links.home}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      官网
-                    </a>
-                  ) : null}
-                  {openaiPreset?.links?.console ? (
-                    <a
-                      className="text-violet-600 hover:text-violet-700 transition-colors"
-                      href={openaiPreset.links.console}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      控制台/Key
-                    </a>
-                  ) : null}
-                  {openaiPreset?.links?.docs ? (
-                    <a
-                      className="text-violet-600 hover:text-violet-700 transition-colors"
-                      href={openaiPreset.links.docs}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      文档
-                    </a>
-                  ) : null}
-                </div>
-              ) : null}
-              <p className="text-[10px] text-slate-400">
-                常用只需粘贴 API Key；Base URL/Model 可在"高级设置"里调整。
-              </p>
-              <div className="bg-slate-50 rounded-lg px-3 py-2 flex items-center justify-between">
-                <span className="text-[10px] text-slate-500">当前配置</span>
-                <span className="text-xs font-medium text-slate-700">
-                  {normalizeBaseUrl(openaiBaseUrl) || '-'} / {openaiModel || '-'}
-                </span>
+              <div className="px-3">
+                <Selector
+                  options={openAiCompatPresets.map((item) => ({ label: item.label, value: item.id }))}
+                  value={[openaiPresetId]}
+                  onChange={(values) => applyOpenaiPreset(values[0] ?? 'openai')}
+                />
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button size="mini" fill="outline" onClick={openOpenaiModelPicker} className="!rounded-full">
-                  选择模型
-                </Button>
+              <div className="px-3">
+                {openaiPreset?.links?.home || openaiPreset?.links?.console || openaiPreset?.links?.docs ? (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                    {openaiPreset?.links?.home ? (
+                      <a
+                        className="text-violet-600 hover:text-violet-700 transition-colors"
+                        href={openaiPreset.links.home}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        官网
+                      </a>
+                    ) : null}
+                    {openaiPreset?.links?.console ? (
+                      <a
+                        className="text-violet-600 hover:text-violet-700 transition-colors"
+                        href={openaiPreset.links.console}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        控制台/Key
+                      </a>
+                    ) : null}
+                    {openaiPreset?.links?.docs ? (
+                      <a
+                        className="text-violet-600 hover:text-violet-700 transition-colors"
+                        href={openaiPreset.links.docs}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        文档
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+              <div className="px-3">
+                <p className="text-[10px] text-slate-400">
+                  常用只需粘贴 API Key；Base URL/Model 可在"高级设置"里调整。
+                </p>
+                <div className="bg-slate-50 rounded-lg px-3 py-2 flex items-center justify-between mt-2">
+                  <span className="text-[10px] text-slate-500">当前配置</span>
+                  <span className="text-xs font-medium text-slate-700">
+                    {normalizeBaseUrl(openaiBaseUrl) || '-'} / {openaiModel || '-'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <Button size="mini" fill="outline" onClick={openOpenaiModelPicker} className="!rounded-full">
+                    选择模型
+                  </Button>
+                </div>
               </div>
             </div>
           ) : (
-            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              <a className="text-violet-600 hover:text-violet-700 transition-colors" href={ollamaLinks.home} target="_blank" rel="noreferrer">
-                Ollama 官网
-              </a>
-              <a className="text-violet-600 hover:text-violet-700 transition-colors" href={ollamaLinks.library} target="_blank" rel="noreferrer">
-                模型库
-              </a>
-              <a className="text-violet-600 hover:text-violet-700 transition-colors" href={ollamaLinks.docs} target="_blank" rel="noreferrer">
-                文档
-              </a>
+            <div className="px-3">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                <a className="text-violet-600 hover:text-violet-700 transition-colors" href={ollamaLinks.home} target="_blank" rel="noreferrer">
+                  Ollama 官网
+                </a>
+                <a className="text-violet-600 hover:text-violet-700 transition-colors" href={ollamaLinks.library} target="_blank" rel="noreferrer">
+                  模型库
+                </a>
+                <a className="text-violet-600 hover:text-violet-700 transition-colors" href={ollamaLinks.docs} target="_blank" rel="noreferrer">
+                  文档
+                </a>
+              </div>
             </div>
           )}
         </div>
