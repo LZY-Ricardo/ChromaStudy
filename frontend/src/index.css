@@ -61,6 +61,13 @@
   --bento-padding: 20px;
   --bento-padding-sm: 16px;
 
+  /* Icon Sizes - Unified */
+  --icon-xs: 14px;
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 24px;
+  --icon-xl: 28px;
+
   /* Antd Mobile Overrides */
   --adm-color-primary: var(--cs-primary);
   --adm-color-success: var(--cs-success-3);
@@ -242,6 +249,126 @@ body {
 }
 
 /* ============================================
+   Soft UI Evolution Enhancements
+   ============================================ */
+
+/* Soft gradient overlays for cards */
+.bento-card-soft {
+  background: linear-gradient(180deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.95) 100%);
+  backdrop-filter: blur(10px);
+}
+
+/* Soft inner glow effect */
+.bento-card-glow {
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.04),
+    0 0 0 1px rgba(255, 255, 255, 0.5) inset,
+    0 1px 0 rgba(255, 255, 255, 0.5) inset;
+}
+
+/* Glass-like card variant */
+.bento-card-glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* Soft status badges */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.status-badge-success {
+  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+  color: #065f46;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+}
+
+.status-badge-error {
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  color: #991b1b;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);
+}
+
+.status-badge-warning {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  color: #92400e;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);
+}
+
+/* Info pill with soft background */
+.info-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* Soft divider */
+.divider-soft {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(148, 163, 184, 0.2) 50%, transparent 100%);
+}
+
+/* Enhanced link styles */
+.link-soft {
+  color: var(--cs-primary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 200ms ease;
+  position: relative;
+}
+
+.link-soft::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: var(--cs-primary);
+  transition: width 200ms ease;
+}
+
+.link-soft:hover::after {
+  width: 100%;
+}
+
+/* Soft input focus ring enhancement */
+.adm-input:focus,
+.adm-text-area:focus {
+  box-shadow:
+    0 0 0 3px var(--cs-primary-bg),
+    0 4px 12px rgba(37, 99, 235, 0.1);
+}
+
+/* Soft button press effect */
+.adm-button:active:not(:disabled) {
+  transform: scale(0.97);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Enhanced selector item */
+.adm-selector-item-multiple {
+  transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.adm-selector-item-multiple:hover {
+  background: rgba(37, 99, 235, 0.04);
+}
+
+/* ============================================
    antd-mobile Component Polish
    ============================================ */
 
@@ -272,6 +399,19 @@ body {
   padding-bottom: 12px;
 }
 
+/* Ensure bento variants override antd-mobile Card defaults */
+.adm-card.bento-card-primary {
+  background: linear-gradient(135deg, var(--cs-primary) 0%, var(--cs-primary-light) 100%);
+  border-color: transparent;
+  color: white;
+}
+
+.adm-card.bento-card-success {
+  background: linear-gradient(135deg, var(--cs-success-3) 0%, var(--cs-success-2) 100%);
+  border-color: transparent;
+  color: white;
+}
+
 .adm-card-body {
   padding-top: var(--bento-padding-sm);
   padding-bottom: var(--bento-padding-sm);
@@ -287,6 +427,9 @@ body {
   border-radius: 14px;
   transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
   letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .adm-button:active {
@@ -297,12 +440,16 @@ body {
   padding-top: 5px;
   padding-bottom: 5px;
   border-radius: 10px;
+  font-size: 12px;
+  height: 28px;
 }
 
 .adm-button.adm-button-small {
   padding-top: 6px;
   padding-bottom: 6px;
   border-radius: 12px;
+  font-size: 13px;
+  height: 32px;
 }
 
 .adm-button.adm-button-large {
@@ -361,6 +508,8 @@ body {
 
 .adm-list-item-content {
   padding: 14px 0;
+  display: flex;
+  align-items: center;
 }
 
 .adm-list-item-content-extra {
@@ -373,6 +522,7 @@ body {
   --width: 44px;
   --height: 24px;
   border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .adm-switch-checkbox {
@@ -394,6 +544,7 @@ body {
   border-radius: 12px;
   border: 1.5px solid var(--cs-border-subtle);
   transition: all 200ms ease;
+  font-size: 14px;
 }
 
 .adm-input:focus,
@@ -418,6 +569,9 @@ body {
   border-radius: 8px;
   font-weight: 500;
   padding: 4px 10px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .adm-tag.adm-tag-fill-outline {
@@ -432,11 +586,109 @@ body {
 
 .adm-selector-item-multiple {
   border-radius: 12px;
+  padding: 8px 12px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+}
+
+/* TabBar */
+.adm-tab-bar {
+  --adm-color-border: transparent;
+}
+
+.adm-tab-bar-item {
+  padding: 0;
+}
+
+.adm-tab-bar-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.adm-tab-bar-item-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.adm-tab-bar-item-title {
+  font-size: 11px;
+  font-weight: 500;
 }
 
 /* ============================================
    Utility Classes
    ============================================ */
+
+/* Flex Alignment Utilities */
+.flex-items-center {
+  display: flex;
+  align-items: center;
+}
+
+.flex-items-start {
+  display: flex;
+  align-items: flex-start;
+}
+
+.flex-justify-between {
+  justify-content: space-between;
+}
+
+.flex-justify-center {
+  justify-content: center;
+}
+
+.flex-gap-1 {
+  gap: 4px;
+}
+
+.flex-gap-2 {
+  gap: 8px;
+}
+
+.flex-gap-3 {
+  gap: 12px;
+}
+
+/* Icon Box - Unified Sizes */
+.icon-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.icon-box-xs {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-box-sm {
+  width: 24px;
+  height: 24px;
+}
+
+.icon-box-md {
+  width: 28px;
+  height: 28px;
+}
+
+.icon-box-lg {
+  width: 32px;
+  height: 32px;
+}
+
+/* Ensure SVG inside icon boxes is centered */
+.icon-box svg,
+.icon-box-xs svg,
+.icon-box-sm svg,
+.icon-box-md svg,
+.icon-box-lg svg {
+  display: block;
+}
 
 /* Soft UI Card */
 .soft-card {
@@ -458,7 +710,7 @@ body {
 }
 
 .stat-label {
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.15em;
   color: var(--cs-text-light);
@@ -563,8 +815,8 @@ body {
 
 /* Icon Button */
 .icon-btn {
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -572,6 +824,7 @@ body {
   background: var(--cs-bg);
   border: 1px solid var(--cs-border-subtle);
   transition: all 200ms ease;
+  font-size: 13px;
 }
 
 @media (hover: hover) {

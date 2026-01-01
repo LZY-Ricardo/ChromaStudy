@@ -82,6 +82,60 @@ function SortableTaskItem({ task, disabled, onToggle }) {
   )
 }
 
+function CategoryPresetChips({ presets, value, onChange, className = '' }) {
+  if (!Array.isArray(presets) || presets.length === 0) return null
+  return (
+    <div className={`flex flex-wrap gap-1.5 ${className}`}>
+      {presets.map((category) => {
+        const active = value === category
+        return (
+          <button
+            key={category}
+            type="button"
+            onClick={() => onChange(category)}
+            className={`rounded-full border px-2 py-1 text-[11px] leading-none transition ${
+              active
+                ? 'border-slate-900 bg-slate-900 text-white'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {category}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function LabelPresetChips({ presets, value, onChange, className = '' }) {
+  if (!Array.isArray(presets) || presets.length === 0) return null
+  const current = parseLabelInput(value)
+  return (
+    <div className={`flex flex-wrap gap-1.5 ${className}`}>
+      {presets.map((label) => {
+        const active = current.includes(label)
+        return (
+          <button
+            key={label}
+            type="button"
+            onClick={() => {
+              const next = active ? current.filter((item) => item !== label) : [...current, label]
+              onChange(next.join(', '))
+            }}
+            className={`rounded-full border px-2 py-1 text-[11px] leading-none transition ${
+              active
+                ? 'border-slate-900 bg-slate-900 text-white'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 // 任务日期分组辅助函数
 function groupTasksByDate(tasks, todayKey) {
   const groups = {
@@ -156,6 +210,8 @@ const WEEKDAY_OPTIONS = [
   { label: '周日', value: 'SU' },
 ]
 const FUTURE_PREVIEW_LIMIT = 10
+const DEFAULT_CATEGORY_PRESETS = ['学习', '复习', '项目', '阅读', '运动', '生活']
+const DEFAULT_LABEL_PRESETS = ['重点', '练习', '复盘', '阅读', '输出', '卡片']
 
 
 function normalizeTimeInput(value) {
@@ -186,10 +242,72 @@ function parseTimeListInput(value) {
 }
 
 function parseLabelInput(value) {
-  return String(value || '')
-    .split(',')
-    .map((item) => item.trim())
+  const text = String(value || '').trim()
+  if (!text) return []
+
+  const parseJson = (input) => {
+    try {
+      return JSON.parse(input)
+    } catch {
+      return null
+    }
+  }
+
+  const sanitizeLabelToken = (token) =>
+    String(token ?? '')
+      .trim()
+      .replace(/^[\[\(\{"'`]+/g, '')
+      .replace(/[\]\)\}"'`]+$/g, '')
+      .trim()
+
+  const parsed = parseJson(text)
+  if (Array.isArray(parsed)) {
+    return parsed.map(sanitizeLabelToken).filter(Boolean)
+  }
+  if (typeof parsed === 'string') {
+    const parsed2 = parseJson(parsed)
+    if (Array.isArray(parsed2)) {
+      return parsed2.map(sanitizeLabelToken).filter(Boolean)
+    }
+  }
+
+  return text
+    .split(/[,，]/)
+    .map(sanitizeLabelToken)
     .filter(Boolean)
+}
+
+function formatLabelListInput(value) {
+  return String(value || '')
+    .replace(/[\s，、]+/g, ',')
+    .replace(/,+/g, ',')
+    .replace(/^,/, '')
+}
+
+function formatTimeInput(value) {
+  const digits = String(value || '')
+    .replace(/\D/g, '')
+    .slice(0, 4)
+  if (!digits) return ''
+  if (digits.length <= 2) return digits
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`
+}
+
+function formatTimeListInput(value) {
+  const digits = String(value || '')
+    .replace(/\D/g, '')
+    .slice(0, 24)
+  if (!digits) return ''
+  const chunks = []
+  for (let index = 0; index < digits.length; index += 4) {
+    chunks.push(digits.slice(index, index + 4))
+  }
+  return chunks
+    .map((chunk) => {
+      if (chunk.length <= 2) return chunk
+      return `${chunk.slice(0, 2)}:${chunk.slice(2)}`
+    })
+    .join(',')
 }
 
 function parseRepeatRule(rule) {
@@ -326,6 +444,59 @@ function Today({ user, syncTick }) {
       Object.entries(grouped).map(([key, items]) => [key, sortByOrder(items, taskOrder)])
     )
   }, [tasks, taskOrder, todayKey])
+
+  const categoryPresets = useMemo(() => {
+    const counts = new Map()
+    for (const task of tasks) {
+      const category = String(task?.category ?? '').trim()
+      if (!category) continue
+      counts.set(category, (counts.get(category) ?? 0) + 1)
+    }
+
+    const fromHistory = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([category]) => category)
+
+    const merged = []
+    const seen = new Set()
+    for (const category of [...fromHistory, ...DEFAULT_CATEGORY_PRESETS]) {
+      if (!category) continue
+      if (seen.has(category)) continue
+      seen.add(category)
+      merged.push(category)
+    }
+    return merged.slice(0, 8)
+  }, [tasks])
+
+  const labelPresets = useMemo(() => {
+    const counts = new Map()
+    for (const task of tasks) {
+      const rawLabels = Array.isArray(task?.labels)
+        ? task.labels
+        : typeof task?.labels === 'string'
+          ? parseLabelInput(task.labels)
+          : []
+      for (const label of rawLabels) {
+        const trimmed = String(label || '').trim()
+        if (!trimmed) continue
+        counts.set(trimmed, (counts.get(trimmed) ?? 0) + 1)
+      }
+    }
+
+    const fromHistory = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([label]) => label)
+
+    const merged = []
+    const seen = new Set()
+    for (const label of [...fromHistory, ...DEFAULT_LABEL_PRESETS]) {
+      if (!label) continue
+      if (seen.has(label)) continue
+      seen.add(label)
+      merged.push(label)
+    }
+    return merged.slice(0, 8)
+  }, [tasks])
 
   // 今日专注模式：只显示逾期、今天、无日期的任务
   const focusModeGroups = useMemo(() => {
@@ -1313,10 +1484,10 @@ function Today({ user, syncTick }) {
         {/* Today Card - Primary */}
         <Card className="bento-card bento-card-primary !border-0 !shadow-md">
           <div className="flex items-center justify-between">
-            <div className="flex-1">
+            <div className="flex-1 leading-tight">
               <p className="text-[10px] uppercase tracking-[0.2em] text-white/70 font-medium">Today</p>
-              <p className="display-font text-xl font-semibold text-white mt-0.5">{todayLabel}</p>
-              <p className="mt-2 text-xs text-white/80">
+              <p className="display-font text-xl font-semibold text-white">{todayLabel}</p>
+              <p className="mt-1.5 text-xs text-white/80">
                 {todayLog
                   ? `已学习 ${todayLog.duration} 分钟`
                   : loading
@@ -1325,9 +1496,9 @@ function Today({ user, syncTick }) {
               </p>
             </div>
             <div className="flex flex-col gap-2">
-              <Tag color="default" fill="outline" className="!bg-white/20 !text-white !border-white/30 !text-[11px]">
+              <span className="inline-flex items-center justify-center px-2 py-1 rounded-full bg-white/20 text-white text-[11px] font-medium">
                 {completedCount}/{taskItems.length}
-              </Tag>
+              </span>
               <Button
                 size="small"
                 fill="outline"
@@ -1343,13 +1514,13 @@ function Today({ user, syncTick }) {
 
         {/* Week Progress Card */}
         <Card className="bento-card !p-3">
-          <div className="text-center">
-            <p className="stat-label text-slate-400">本周进度</p>
-            <div className="mt-1">
+          <div className="text-center leading-none">
+            <p className="stat-label text-slate-400 mb-2">本周进度</p>
+            <div className="flex items-baseline justify-center gap-0.5">
               <span className="stat-value text-xl">{weeklyMinutes}</span>
               <span className="text-slate-400 text-sm">/{weeklyGoalMinutes}</span>
             </div>
-            <p className="text-[10px] text-slate-400 mt-1">连续打卡 {streakDays} 天</p>
+            <p className="text-[10px] text-slate-400 mt-2">连续打卡 {streakDays} 天</p>
             <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500"
@@ -1450,17 +1621,17 @@ function Today({ user, syncTick }) {
 
       {/* Task List - Bento Card */}
       <Card className="bento-card">
-        <div className="flex items-center justify-between p-3 pb-2">
+        <div className="flex items-center justify-between pt-3 pb-2">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center">
-              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <div className="icon-box icon-box-sm rounded-lg bg-gradient-to-br from-slate-600 to-slate-700">
+              <svg className="w-3.5 h-3.5 text-white block" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
               </svg>
             </div>
-            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">任务列表</p>
-            <Tag color="primary" fill="outline" className="!text-[10px]">
+            <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider">任务列表</span>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 text-[10px] font-medium leading-tight">
               {completedCount}/{taskItems.length}
-            </Tag>
+            </span>
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -2056,9 +2227,12 @@ function Today({ user, syncTick }) {
                     placeholder="HH:mm"
                     value={aiBatchDueTime}
                     onChange={(value) => {
-                      setAiBatchDueTime(value)
-                      applyBatchToSelected({ dueTime: value })
+                      const next = formatTimeInput(value)
+                      setAiBatchDueTime(next)
+                      applyBatchToSelected({ dueTime: next })
                     }}
+                    type="tel"
+                    maxLength={5}
                     clearable
                     className="!text-xs"
                   />
@@ -2080,6 +2254,15 @@ function Today({ user, syncTick }) {
                 </div>
                 <div>
                   <p className="text-[10px] text-slate-400 mb-1">分类</p>
+                  <CategoryPresetChips
+                    presets={categoryPresets}
+                    value={aiBatchCategory}
+                    onChange={(value) => {
+                      setAiBatchCategory(value)
+                      applyBatchToSelected({ category: value })
+                    }}
+                    className="mt-1"
+                  />
                   <Input
                     placeholder="可选"
                     value={aiBatchCategory}
@@ -2088,20 +2271,32 @@ function Today({ user, syncTick }) {
                       applyBatchToSelected({ category: value })
                     }}
                     clearable
+                    className="mt-2"
                   />
                 </div>
               </div>
 
               <div>
                 <p className="text-[10px] text-slate-400 mb-1">标签</p>
-                <Input
-                  placeholder="逗号分隔"
+                <LabelPresetChips
+                  presets={labelPresets}
                   value={aiBatchLabels}
                   onChange={(value) => {
                     setAiBatchLabels(value)
                     applyBatchToSelected({ labels: value })
                   }}
+                  className="mt-1"
+                />
+                <Input
+                  placeholder="输入标签，空格分隔"
+                  value={aiBatchLabels}
+                  onChange={(value) => {
+                    const next = formatLabelListInput(value)
+                    setAiBatchLabels(next)
+                    applyBatchToSelected({ labels: next })
+                  }}
                   clearable
+                  className="mt-2"
                 />
               </div>
 
@@ -2138,9 +2333,11 @@ function Today({ user, syncTick }) {
                 placeholder="提醒时间（HH:mm，逗号分隔）"
                 value={aiBatchReminderTimes}
                 onChange={(value) => {
-                  setAiBatchReminderTimes(value)
-                  applyBatchToSelected({ reminderTimes: value })
+                  const next = formatTimeListInput(value)
+                  setAiBatchReminderTimes(next)
+                  applyBatchToSelected({ reminderTimes: next })
                 }}
+                type="tel"
                 clearable
               />
             </div>
@@ -2223,8 +2420,12 @@ function Today({ user, syncTick }) {
                   placeholder="HH:mm"
                   value={aiEditingDraft?.dueTime || ''}
                   onChange={(value) =>
-                    setAiEditingDraft((prev) => (prev ? { ...prev, dueTime: value } : prev))
+                    setAiEditingDraft((prev) =>
+                      prev ? { ...prev, dueTime: formatTimeInput(value) } : prev
+                    )
                   }
+                  type="tel"
+                  maxLength={5}
                   clearable
                   className="!text-xs"
                 />
@@ -2246,6 +2447,14 @@ function Today({ user, syncTick }) {
               </div>
               <div>
                 <p className="text-[10px] text-slate-400 mb-1">分类</p>
+                <CategoryPresetChips
+                  presets={categoryPresets}
+                  value={aiEditingDraft?.category || ''}
+                  onChange={(value) =>
+                    setAiEditingDraft((prev) => (prev ? { ...prev, category: value } : prev))
+                  }
+                  className="mt-1"
+                />
                 <Input
                   placeholder="可选"
                   value={aiEditingDraft?.category || ''}
@@ -2253,19 +2462,31 @@ function Today({ user, syncTick }) {
                     setAiEditingDraft((prev) => (prev ? { ...prev, category: value } : prev))
                   }
                   clearable
+                  className="mt-2"
                 />
               </div>
             </div>
 
             <div>
               <p className="text-[10px] text-slate-400 mb-1">标签</p>
-              <Input
-                placeholder="逗号分隔"
+              <LabelPresetChips
+                presets={labelPresets}
                 value={aiEditingDraft?.labels || ''}
                 onChange={(value) =>
                   setAiEditingDraft((prev) => (prev ? { ...prev, labels: value } : prev))
                 }
+                className="mt-1"
+              />
+              <Input
+                placeholder="输入标签，空格分隔"
+                value={aiEditingDraft?.labels || ''}
+                onChange={(value) =>
+                  setAiEditingDraft((prev) =>
+                    prev ? { ...prev, labels: formatLabelListInput(value) } : prev
+                  )
+                }
                 clearable
+                className="mt-2"
               />
             </div>
 
@@ -2307,8 +2528,11 @@ function Today({ user, syncTick }) {
                 placeholder="HH:mm，逗号分隔"
                 value={aiEditingDraft?.reminderTimes || ''}
                 onChange={(value) =>
-                  setAiEditingDraft((prev) => (prev ? { ...prev, reminderTimes: value } : prev))
+                  setAiEditingDraft((prev) =>
+                    prev ? { ...prev, reminderTimes: formatTimeListInput(value) } : prev
+                  )
                 }
+                type="tel"
                 clearable
               />
             </div>
@@ -2425,12 +2649,19 @@ function Today({ user, syncTick }) {
                     onChange={(val) => setEditingPriority(val[0] ?? null)}
                   />
                 </div>
-                <Input
-                  placeholder="\u5206\u7c7b\uff08\u53ef\u9009\uff09"
-                  value={editingCategory}
-                  onChange={setEditingCategory}
-                  clearable
-                />
+                <div className="space-y-2">
+                  <CategoryPresetChips
+                    presets={categoryPresets}
+                    value={editingCategory}
+                    onChange={setEditingCategory}
+                  />
+                  <Input
+                    placeholder="\u5206\u7c7b\uff08\u53ef\u9009\uff09"
+                    value={editingCategory}
+                    onChange={setEditingCategory}
+                    clearable
+                  />
+                </div>
                 <Input
                   placeholder="\u6807\u7b7e\uff08\u9017\u53f7\u5206\u9694\uff09"
                   value={editingLabels}
@@ -2567,12 +2798,19 @@ function Today({ user, syncTick }) {
                     onChange={(val) => setTaskPriority(val[0] ?? null)}
                   />
                 </div>
-                <Input
-                  placeholder="\u5206\u7c7b\uff08\u53ef\u9009\uff09"
-                  value={taskCategory}
-                  onChange={setTaskCategory}
-                  clearable
-                />
+                <div className="space-y-2">
+                  <CategoryPresetChips
+                    presets={categoryPresets}
+                    value={taskCategory}
+                    onChange={setTaskCategory}
+                  />
+                  <Input
+                    placeholder="\u5206\u7c7b\uff08\u53ef\u9009\uff09"
+                    value={taskCategory}
+                    onChange={setTaskCategory}
+                    clearable
+                  />
+                </div>
                 <Input
                   placeholder="\u6807\u7b7e\uff08\u9017\u53f7\u5206\u9694\uff09"
                   value={taskLabels}

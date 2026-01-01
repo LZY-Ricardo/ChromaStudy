@@ -1447,6 +1447,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
       const registration = await navigator.serviceWorker?.getRegistration?.()
       if (registration?.showNotification) {
         await registration.showNotification('ChromaStudy', payload)
+        Toast.show({ content: '已触发测试通知（如未看到请检查系统通知设置）' })
         return
       }
     } catch {
@@ -1455,6 +1456,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
 
     try {
       new window.Notification('ChromaStudy', payload)
+      Toast.show({ content: '已触发测试通知（如未看到请检查系统通知设置）' })
     } catch {
       Toast.show({ content: '通知发送失败' })
     }
@@ -1462,75 +1464,66 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
 
   return (
     <div className="space-y-4">
-      {/* Profile Card - Bento Style */}
-      <Card className="bento-card">
-        <div className="flex items-center gap-2 p-3 pb-2">
-          <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center">
-            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-          </div>
-          <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">用户资料</p>
-        </div>
-        <div className="px-3 pb-3">
-          <p className="text-sm text-slate-600 mb-3">用户：{user?.username ?? 'unknown'}</p>
-          <Button
-            block
-            color="warning"
-            fill="outline"
-            onClick={() => {
-              onLogout?.()
-              Toast.show({ content: '已退出登录' })
-            }}
-            className="!rounded-full"
-          >
-            退出登录 / 切换账号
-          </Button>
-        </div>
-      </Card>
-
-      {/* Sync Card - Bento Style */}
-      <Card className="bento-card">
-        <div className="flex items-center justify-between p-3 pb-2">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+      {/* Bento Grid Row 1: Profile + Sync */}
+      <div className="bento-grid bento-grid-2">
+        {/* Profile Card - Bento Style Compact */}
+        <Card className="bento-card">
+          <div className="flex items-center gap-2 p-3 pb-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center">
               <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
             </div>
-            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">数据同步</p>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">用户资料</p>
           </div>
-          <span className="pill-badge-sm pill-badge-primary">{pendingCount} 项待同步</span>
-        </div>
-        <div className="px-3 pb-3 space-y-3">
-          {lastSync ? (
-            <div className="bg-slate-50 rounded-xl px-3 py-2">
-              <p className="text-[10px] text-slate-400">
-                上次：{lastSyncLabel || '未知'} · 成功 {lastSync.succeeded}/{lastSync.processed} · 失败 {lastSync.failed}
-              </p>
-              {lastSync.blocked === 'conflict' && blockedOp ? (
-                <p className="text-[10px] text-amber-600 mt-1">
-                  阻塞：{formatOpTitle(blockedOp)} {formatOpSummary(blockedOp)}
-                </p>
-              ) : null}
-            </div>
-          ) : (
-            <p className="text-[10px] text-slate-400">尚未执行过同步</p>
-          )}
-
-          <div className="flex flex-col gap-2">
+          <div className="px-3 pb-3">
+            <p className="text-sm text-slate-600 mb-2 truncate">{user?.username ?? 'unknown'}</p>
             <Button
               block
+              size="small"
+              color="warning"
+              fill="outline"
+              onClick={() => {
+                onLogout?.()
+                Toast.show({ content: '已退出登录' })
+              }}
+              className="!rounded-full"
+            >
+              退出登录
+            </Button>
+          </div>
+        </Card>
+
+        {/* Sync Card - Bento Style Compact */}
+        <Card className="bento-card">
+          <div className="flex items-center justify-between p-3 pb-2">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+                <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </div>
+              <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">数据同步</p>
+            </div>
+            {pendingCount > 0 && (
+              <span className="pill-badge-sm pill-badge-primary">{pendingCount}</span>
+            )}
+          </div>
+          <div className="px-3 pb-3">
+            <Button
+              block
+              size="small"
               color="primary"
               disabled={syncing || pendingCount <= 0}
               onClick={() => onSyncNow?.()}
-              className="!rounded-full"
+              className="!rounded-full mb-3"
             >
               {syncing ? '同步中...' : pendingCount > 0 ? '立即同步' : '暂无待同步'}
             </Button>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <Button
                 block
+                size="small"
                 fill="outline"
                 disabled={syncing || (pendingCount <= 0 && !blockedOp)}
                 onClick={() => setPendingOpen(true)}
@@ -1540,6 +1533,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
               </Button>
               <Button
                 block
+                size="small"
                 fill="outline"
                 color="warning"
                 disabled={syncing || pendingCount <= 0}
@@ -1550,50 +1544,86 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
               </Button>
             </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </div>
 
-      {/* Habit Card - Bento Style */}
-      <Card className="bento-card">
-        <div className="flex items-center gap-2 p-3 pb-2">
-          <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
-            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-            </svg>
+      {/* Bento Grid Row 2: Habit + Notifications */}
+      <div className="bento-grid bento-grid-2">
+        {/* Habit Card - Bento Style Compact */}
+        <Card className="bento-card">
+          <div className="flex items-center gap-2 p-3 pb-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
+              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">周目标</p>
           </div>
-          <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">周目标</p>
-        </div>
-        <List>
-          <List.Item>
-            <Input
-              type="number"
-              inputMode="numeric"
-              placeholder="周目标分钟数（默认 300）"
-              value={String(weeklyGoal ?? '')}
-              onChange={(value) => setWeeklyGoal(value)}
-              clearable
-            />
-          </List.Item>
-        </List>
-        <div className="px-3 pb-3">
-          <Button
-            block
-            fill="outline"
-            onClick={() => {
-              const minutes = Number.parseInt(String(weeklyGoal), 10)
-              if (!Number.isFinite(minutes) || minutes <= 0) {
-                Toast.show({ content: '请输入有效的周目标分钟数' })
-                return
-              }
-              saveWeeklyGoal(user?.id, minutes)
-              Toast.show({ content: '周目标已保存' })
-            }}
-            className="!rounded-full"
-          >
-            保存周目标
-          </Button>
-        </div>
-      </Card>
+          <div className="px-3 pb-3">
+            <div className="flex gap-2 mb-2">
+              <Input
+                type="number"
+                inputMode="numeric"
+                placeholder="分钟"
+                value={String(weeklyGoal ?? '')}
+                onChange={(value) => setWeeklyGoal(value)}
+                clearable
+                className="flex-1"
+              />
+              <Button
+                size="small"
+                fill="outline"
+                onClick={() => {
+                  const minutes = Number.parseInt(String(weeklyGoal), 10)
+                  if (!Number.isFinite(minutes) || minutes <= 0) {
+                    Toast.show({ content: '请输入有效的周目标分钟数' })
+                    return
+                  }
+                  saveWeeklyGoal(user?.id, minutes)
+                  Toast.show({ content: '周目标已保存' })
+                }}
+                className="!rounded-full !shrink-0"
+              >
+                保存
+              </Button>
+            </div>
+            <p className="text-[10px] text-slate-400">默认 300 分钟/周</p>
+          </div>
+        </Card>
+
+        {/* Notifications Card - Bento Style Compact */}
+        <Card className="bento-card">
+          <div className="flex items-center gap-2 p-3 pb-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">通知</p>
+          </div>
+          <div className="px-3 pb-3 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                size="small"
+                fill="outline"
+                onClick={requestNotificationPermission}
+                className="!rounded-full !overflow-hidden !text-ellipsis"
+              >
+                开启权限
+              </Button>
+              <Button
+                size="small"
+                color="primary"
+                onClick={sendTestNotification}
+                className="!rounded-full !overflow-hidden !text-ellipsis"
+              >
+                测试通知
+              </Button>
+            </div>
+            <p className="text-[10px] text-slate-400">PWA 通知适合尽力提醒</p>
+          </div>
+        </Card>
+      </div>
 
       {/* AI Provider Card - Bento Style */}
       <Card className="bento-card">
@@ -1605,132 +1635,146 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
           </div>
           <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">AI 设置</p>
         </div>
-        <div className="space-y-3">
-          <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-            配置档案
-          </div>
-          <Selector
-            options={aiState.profiles.map((p) => ({ label: p.name || p.id, value: p.id }))}
-            value={[aiState.activeProfileId]}
-            onChange={(values) => switchProfile(values[0])}
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button size="mini" fill="outline" onClick={createProfile}>
-              新建
-            </Button>
-            <Button size="mini" fill="outline" onClick={duplicateProfile}>
-              复制
-            </Button>
-            <Button size="mini" fill="outline" onClick={renameProfile}>
-              重命名
-            </Button>
-            <Button
-              size="mini"
-              color="danger"
-              fill="outline"
-              disabled={aiState.profiles.length <= 1}
-              onClick={removeProfile}
-            >
-              删除
-            </Button>
-          </div>
-          <p className="text-xs text-slate-400">
-            最近测试：
-            {activeProfile?.health?.at
-              ? `${activeProfile.health.ok ? '通过' : '失败'} · ${(() => {
-                  try {
-                    return new Date(activeProfile.health.at).toLocaleString()
-                  } catch {
-                    return ''
-                  }
-                })()}`
-              : '未测试'}
-          </p>
-        </div>
-
-        <div className="mt-4 space-y-3">
-          <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-            Provider
-          </div>
-          <SegmentedControl
-            options={[
-              { label: '本地 Ollama', value: 'ollama' },
-              { label: '云端（OpenAI 兼容）', value: 'openai' },
-            ]}
-            value={provider}
-            onChange={(next) => setProvider(next ?? 'ollama')}
-          />
-        </div>
-
-        {provider === 'openai' ? (
-          <div className="mt-3 space-y-3">
+        <div className="space-y-4">
+          {/* Profile Section */}
+          <div className="space-y-3">
             <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-              Cloud Preset
+              配置档案
             </div>
             <Selector
-              options={openAiCompatPresets.map((item) => ({ label: item.label, value: item.id }))}
-              value={[openaiPresetId]}
-              onChange={(values) => applyOpenaiPreset(values[0] ?? 'openai')}
+              options={aiState.profiles.map((p) => ({ label: p.name || p.id, value: p.id }))}
+              value={[aiState.activeProfileId]}
+              onChange={(values) => switchProfile(values[0])}
             />
-            {openaiPreset?.links?.home || openaiPreset?.links?.console || openaiPreset?.links?.docs ? (
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                {openaiPreset?.links?.home ? (
-                  <a
-                    className="text-blue-600"
-                    href={openaiPreset.links.home}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    官网
-                  </a>
-                ) : null}
-                {openaiPreset?.links?.console ? (
-                  <a
-                    className="text-blue-600"
-                    href={openaiPreset.links.console}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    控制台/Key
-                  </a>
-                ) : null}
-                {openaiPreset?.links?.docs ? (
-                  <a
-                    className="text-blue-600"
-                    href={openaiPreset.links.docs}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    文档
-                  </a>
-                ) : null}
-              </div>
-            ) : null}
-            <p className="text-xs text-slate-400">
-              常用只需粘贴 API Key；Base URL/Model 可在“高级设置”里调整。
-            </p>
-            <div className="text-xs text-slate-500">
-              当前：{normalizeBaseUrl(openaiBaseUrl) || '-'} / {openaiModel || '-'}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button size="mini" fill="outline" onClick={openOpenaiModelPicker}>
-                选择模型
+            <div className="grid grid-cols-4 gap-2">
+              <Button size="mini" fill="outline" onClick={createProfile} className="!rounded-full">
+                新建
+              </Button>
+              <Button size="mini" fill="outline" onClick={duplicateProfile} className="!rounded-full">
+                复制
+              </Button>
+              <Button size="mini" fill="outline" onClick={renameProfile} className="!rounded-full">
+                重命名
+              </Button>
+              <Button
+                size="mini"
+                color="danger"
+                fill="outline"
+                disabled={aiState.profiles.length <= 1}
+                onClick={removeProfile}
+                className="!rounded-full"
+              >
+                删除
               </Button>
             </div>
+            <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium ${
+              activeProfile?.health?.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${activeProfile?.health?.ok ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+              最近测试：{activeProfile?.health?.at
+                ? `${activeProfile.health.ok ? '通过' : '失败'} · ${(() => {
+                    try {
+                      return new Date(activeProfile.health.at).toLocaleString()
+                    } catch {
+                      return ''
+                    }
+                  })()}`
+                : '未测试'}
+            </div>
           </div>
-        ) : (
-          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-            <a className="text-blue-600" href={ollamaLinks.home} target="_blank" rel="noreferrer">
-              Ollama 官网
-            </a>
-            <a className="text-blue-600" href={ollamaLinks.library} target="_blank" rel="noreferrer">
-              模型库
-            </a>
-            <a className="text-blue-600" href={ollamaLinks.docs} target="_blank" rel="noreferrer">
-              文档
-            </a>
+
+          {/* Divider */}
+          <div className="h-px bg-slate-100" />
+
+          {/* Provider Section */}
+          <div className="space-y-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+              Provider
+            </div>
+            <SegmentedControl
+              options={[
+                { label: '本地 Ollama', value: 'ollama' },
+                { label: '云端（OpenAI 兼容）', value: 'openai' },
+              ]}
+              value={provider}
+              onChange={(next) => setProvider(next ?? 'ollama')}
+            />
           </div>
-        )}
+
+          {/* Provider Specific Settings */}
+          {provider === 'openai' ? (
+            <div className="space-y-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                Cloud Preset
+              </div>
+              <Selector
+                options={openAiCompatPresets.map((item) => ({ label: item.label, value: item.id }))}
+                value={[openaiPresetId]}
+                onChange={(values) => applyOpenaiPreset(values[0] ?? 'openai')}
+              />
+              {openaiPreset?.links?.home || openaiPreset?.links?.console || openaiPreset?.links?.docs ? (
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                  {openaiPreset?.links?.home ? (
+                    <a
+                      className="text-violet-600 hover:text-violet-700 transition-colors"
+                      href={openaiPreset.links.home}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      官网
+                    </a>
+                  ) : null}
+                  {openaiPreset?.links?.console ? (
+                    <a
+                      className="text-violet-600 hover:text-violet-700 transition-colors"
+                      href={openaiPreset.links.console}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      控制台/Key
+                    </a>
+                  ) : null}
+                  {openaiPreset?.links?.docs ? (
+                    <a
+                      className="text-violet-600 hover:text-violet-700 transition-colors"
+                      href={openaiPreset.links.docs}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      文档
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
+              <p className="text-[10px] text-slate-400">
+                常用只需粘贴 API Key；Base URL/Model 可在"高级设置"里调整。
+              </p>
+              <div className="bg-slate-50 rounded-lg px-3 py-2 flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">当前配置</span>
+                <span className="text-xs font-medium text-slate-700">
+                  {normalizeBaseUrl(openaiBaseUrl) || '-'} / {openaiModel || '-'}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="mini" fill="outline" onClick={openOpenaiModelPicker} className="!rounded-full">
+                  选择模型
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              <a className="text-violet-600 hover:text-violet-700 transition-colors" href={ollamaLinks.home} target="_blank" rel="noreferrer">
+                Ollama 官网
+              </a>
+              <a className="text-violet-600 hover:text-violet-700 transition-colors" href={ollamaLinks.library} target="_blank" rel="noreferrer">
+                模型库
+              </a>
+              <a className="text-violet-600 hover:text-violet-700 transition-colors" href={ollamaLinks.docs} target="_blank" rel="noreferrer">
+                文档
+              </a>
+            </div>
+          )}
+        </div>
 
         <List className="mt-3">
           {provider === 'ollama' ? (
@@ -1807,48 +1851,65 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
           )}
         </List>
 
-        <div className="mt-4 space-y-2">
-          <Button block fill="outline" loading={aiTesting} onClick={testAiConnection}>
-            测试连接
-          </Button>
-          <Button block color="primary" onClick={persist} disabled={aiTesting}>
-            保存 AI 设置
-          </Button>
-          <p className="mt-2 text-xs text-slate-400">
-            云端模式会把 Key 发送到你的后端用于转发请求；请仅在可信环境使用。
-          </p>
+        {/* Action Buttons */}
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              block
+              fill="outline"
+              loading={aiTesting}
+              onClick={testAiConnection}
+              className="!rounded-full"
+            >
+              测试连接
+            </Button>
+            <Button
+              block
+              color="primary"
+              onClick={persist}
+              disabled={aiTesting}
+              className="!rounded-full"
+            >
+              保存设置
+            </Button>
+          </div>
+          <div className="bg-amber-50 rounded-xl px-3 py-2">
+            <p className="text-[10px] text-amber-700 leading-relaxed">
+              云端模式会把 Key 发送到你的后端用于转发请求；请仅在可信环境使用。
+            </p>
+          </div>
         </div>
       </Card>
 
-      <Card
-        title="Notifications (PWA)"
-        className="rounded-2xl border border-slate-100 bg-white shadow-sm"
-      >
-        <div className="space-y-3">
-          <Button block fill="outline" onClick={requestNotificationPermission}>
-            开启通知权限
-          </Button>
-          <Button block onClick={sendTestNotification}>
-            发送测试通知
-          </Button>
-          <p className="text-xs text-slate-400">
-            PWA 通知更适合“尽力提醒”；若需要严格定时/重复提醒，后续可升级系统级通知。
-          </p>
+      {/* Data Management Card - Bento Style */}
+      <Card className="bento-card">
+        <div className="flex items-center gap-2 p-3 pb-2">
+          <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+            </svg>
+          </div>
+          <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">数据管理</p>
         </div>
-      </Card>
-
-      <Card title="Export" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <div className="space-y-3">
-          <Button block fill="outline" onClick={exportLocalData}>
-            导出本地数据（JSON）
-          </Button>
-          <Button
-            block
-            color="primary"
-            onClick={() => fileInputRef.current?.click?.()}
-          >
-            导入本地数据（JSON）
-          </Button>
+        <div className="px-3 pb-3 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              block
+              fill="outline"
+              onClick={exportLocalData}
+              className="!rounded-full"
+            >
+              导出数据
+            </Button>
+            <Button
+              block
+              color="primary"
+              onClick={() => fileInputRef.current?.click?.()}
+              className="!rounded-full"
+            >
+              导入数据
+            </Button>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
@@ -1856,9 +1917,14 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
             onChange={handleImportFileChange}
             style={{ display: 'none' }}
           />
-          <p className="text-xs text-slate-400">
-            导出包含：任务/打卡缓存、复盘、答题复习题卡、本地设置、待同步队列；默认不导出云端 API Key。导入会覆盖本地数据。
-          </p>
+          <div className="bg-slate-50 rounded-xl px-3 py-2">
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              导出包含：任务、打卡缓存、复盘、答题复习题卡、本地设置、待同步队列；默认不导出云端 API Key。
+            </p>
+            <p className="text-[10px] text-amber-600 mt-1">
+              注意：导入会覆盖本地数据，请谨慎操作。
+            </p>
+          </div>
         </div>
       </Card>
 

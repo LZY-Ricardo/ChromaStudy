@@ -21,7 +21,11 @@
       "Bash(pnpm install)",
       "Bash(npx prisma migrate dev:*)",
       "Bash(npm run dev)",
-      "Bash(npx prisma generate)"
+      "Bash(npx prisma generate)",
+      "Skill(ui-ux-pro-max)",
+      "Skill(ui-ux-pro-max:*)",
+      "Bash(python3:*)",
+      "Bash(python:*)"
     ]
   }
 }

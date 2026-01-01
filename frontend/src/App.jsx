@@ -215,9 +215,9 @@ function Shell({ user, onLogout }) {
       {/* Bento-style Header */}
       <header className="bento-card bento-card-compact p-3">
         <div className="flex items-center justify-between">
-          <div>
+          <div className="leading-tight">
             <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-semibold">ChromaStudy</p>
-            <h1 className="display-font text-lg font-bold text-slate-900 leading-tight">
+            <h1 className="display-font text-lg font-bold text-slate-900">
               Focus. Log. Level up.
             </h1>
           </div>
@@ -226,7 +226,7 @@ function Shell({ user, onLogout }) {
             className="icon-btn !w-auto !rounded-full px-3 gap-2 !text-xs"
             onClick={openAiSwitcher}
           >
-            <span className="relative flex h-2 w-2">
+            <span className="relative flex h-2 w-2 flex-shrink-0">
               {aiHealthy ? (
                 <span
                   className={`absolute inline-flex h-full w-full rounded-full ${aiDotClass} opacity-60 animate-ping motion-reduce:animate-none`}
@@ -234,7 +234,7 @@ function Shell({ user, onLogout }) {
               ) : null}
               <span className={`relative inline-flex h-2 w-2 rounded-full ${aiDotClass}`} />
             </span>
-            {aiPillLabel}
+            <span className="truncate">{aiPillLabel}</span>
           </button>
         </div>
       </header>

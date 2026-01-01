@@ -221,10 +221,12 @@ function Stats({ user, syncTick }) {
               fill="outline"
               onClick={handleShare}
               disabled={loading || streakDays === 0}
-              className="!rounded-full"
+              className="!rounded-full !inline-flex !items-center !justify-center"
             >
-              <Share2 size={14} className="mr-1" />
-              分享
+              <span className="inline-flex items-center justify-center gap-1">
+                <Share2 size={14} />
+                <span>分享</span>
+              </span>
             </Button>
           </div>
         </Card>

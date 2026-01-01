@@ -1,6 +1,9 @@
 import { useRef, useState } from 'react'
 import { Button, Card, Input, Toast } from 'antd-mobile'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { apiBaseUrl } from '../services/api.js'
+import { clearAuth, loadAccessToken, loadRefreshToken, saveAuth } from '../utils/authStorage.js'
 import { loadAiConfig } from '../utils/storage.js'
 
 function Chat() {
@@ -51,14 +54,68 @@ function Chat() {
     setStreaming(true)
 
     try {
+      const refreshAccessToken = async () => {
+        const refreshToken = loadRefreshToken()
+        if (!refreshToken) {
+          throw new Error('missing_refresh_token')
+        }
+
+        const refreshResponse = await fetch(`${apiBaseUrl}/api/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        })
+
+        if (!refreshResponse.ok) {
+          if (refreshResponse.status === 401) {
+            clearAuth()
+          }
+          throw new Error('refresh_failed')
+        }
+
+        const payload = await refreshResponse.json()
+        saveAuth(payload)
+        const nextToken = loadAccessToken()
+        if (!nextToken) {
+          throw new Error('refresh_failed')
+        }
+        return nextToken
+      }
+
+      const createChatRequest = (token) => {
+        const headers = { 'Content-Type': 'application/json' }
+        if (token) {
+          headers.Authorization = `Bearer ${token}`
+        }
+        return fetch(`${apiBaseUrl}/api/chat`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ messages: payloadMessages, ai: loadAiConfig() }),
+        })
+      }
+
       console.log('Sending request to:', `${apiBaseUrl}/api/chat`)
       console.log('Payload:', { messages: payloadMessages, ai: loadAiConfig() })
 
-      const response = await fetch(`${apiBaseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: payloadMessages, ai: loadAiConfig() }),
-      })
+      const initialToken = loadAccessToken()
+      const refreshToken = loadRefreshToken()
+
+      if (!initialToken && !refreshToken) {
+        Toast.show({ content: '请先登录后再使用 Mate' })
+        return
+      }
+
+      let response = await createChatRequest(initialToken)
+
+      if (response.status === 401 && refreshToken) {
+        try {
+          const nextToken = await refreshAccessToken()
+          response = await createChatRequest(nextToken)
+        } catch {
+          Toast.show({ content: '登录已过期，请重新登录' })
+          return
+        }
+      }
 
       console.log('Response status:', response.status)
       console.log('Response headers:', Object.fromEntries(response.headers.entries()))
@@ -179,7 +236,72 @@ function Chat() {
                   : 'border-slate-100 bg-slate-50 text-slate-700'
               }`}
             >
-              {message.content || (message.role === 'assistant' && streaming ? '...' : '')}
+              {message.role === 'assistant' ? (
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    h1: (props) => (
+                      <h1 className="my-2 text-base font-semibold first:mt-0" {...props} />
+                    ),
+                    h2: (props) => (
+                      <h2 className="my-2 text-sm font-semibold first:mt-0" {...props} />
+                    ),
+                    h3: (props) => (
+                      <h3 className="my-2 text-sm font-semibold first:mt-0" {...props} />
+                    ),
+                    p: (props) => (
+                      <p className="my-2 leading-relaxed first:mt-0 last:mb-0" {...props} />
+                    ),
+                    ul: (props) => <ul className="my-2 list-disc pl-5 space-y-1" {...props} />,
+                    ol: (props) => <ol className="my-2 list-decimal pl-5 space-y-1" {...props} />,
+                    li: (props) => <li className="leading-relaxed" {...props} />,
+                    blockquote: (props) => (
+                      <blockquote className="my-2 border-l-4 border-slate-300 pl-3 text-slate-600" {...props} />
+                    ),
+                    a: ({ href, ...props }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 underline underline-offset-2"
+                        {...props}
+                      />
+                    ),
+                    pre: (props) => (
+                      <pre className="my-2 overflow-x-auto rounded-xl bg-slate-900 p-3 text-xs text-slate-100" {...props} />
+                    ),
+                    code: ({ inline, ...props }) =>
+                      inline ? (
+                        <code
+                          className="rounded bg-slate-200/60 px-1 py-0.5 font-mono text-[0.85em]"
+                          {...props}
+                        />
+                      ) : (
+                        <code className="font-mono" {...props} />
+                      ),
+                    table: ({ className, ...props }) => (
+                      <div className="my-2 overflow-x-auto">
+                        <table
+                          className={`w-full border-collapse text-xs ${className || ''}`}
+                          {...props}
+                        />
+                      </div>
+                    ),
+                    th: (props) => (
+                      <th className="border border-slate-200 bg-slate-100 px-2 py-1 text-left font-semibold" {...props} />
+                    ),
+                    td: (props) => (
+                      <td className="border border-slate-200 px-2 py-1 align-top" {...props} />
+                    ),
+                    del: (props) => <del className="line-through" {...props} />,
+                    hr: (props) => <hr className="my-3 border-slate-200" {...props} />,
+                  }}
+                >
+                  {message.content || (streaming ? '...' : '')}
+                </ReactMarkdown>
+              ) : (
+                <span className="whitespace-pre-wrap leading-relaxed">{message.content}</span>
+              )}
             </div>
           ))}
         </div>
