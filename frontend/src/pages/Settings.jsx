@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { ActionSheet, Button, Card, Dialog, Input, List, Selector, Switch, TextArea, Toast } from 'antd-mobile'
 import { listAiModels, pingAi } from '../services/api.js'
+import SegmentedControl from '../components/SegmentedControl.jsx'
 import {
   deleteAiProfile,
   loadAiConfig,
@@ -1621,13 +1622,13 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
           <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
             Provider
           </div>
-          <Selector
+          <SegmentedControl
             options={[
-              { label: 'Ollama（本地）', value: 'ollama' },
-              { label: '云端（OpenAI兼容）', value: 'openai' },
+              { label: '本地 Ollama', value: 'ollama' },
+              { label: '云端（OpenAI 兼容）', value: 'openai' },
             ]}
-            value={[provider]}
-            onChange={(values) => setProvider(values[0] ?? 'ollama')}
+            value={provider}
+            onChange={(next) => setProvider(next ?? 'ollama')}
           />
         </div>
 

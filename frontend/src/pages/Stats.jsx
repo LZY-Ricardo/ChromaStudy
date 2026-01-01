@@ -228,8 +228,14 @@ function Stats({ user, syncTick }) {
           </div>
         </div>
 
-        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${weeklyProgress * 100}%` }} />
+        <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-slate-100/80 shadow-inner">
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${weeklyProgress * 100}%`,
+              background: 'linear-gradient(90deg, var(--cs-success-2), var(--cs-success-3))',
+            }}
+          />
         </div>
 
         <div className="mt-4 h-28">

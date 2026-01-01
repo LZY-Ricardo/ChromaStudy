@@ -158,6 +158,7 @@ function Shell({ user, onLogout }) {
       ? 'bg-emerald-400'
       : 'bg-rose-400'
     : 'bg-slate-300'
+  const aiHealthy = Boolean(activeAiProfile?.health?.at && activeAiProfile.health.ok)
 
   const formatProfileDescription = (profile) => {
     if (!profile) return ''
@@ -214,7 +215,7 @@ function Shell({ user, onLogout }) {
       <header className="flex items-center justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">ChromaStudy</p>
-          <h1 className="display-font text-2xl font-semibold text-slate-900">
+          <h1 className="display-font text-2xl font-bold text-slate-900">
             Focus. Log. Level up.
           </h1>
         </div>
@@ -223,7 +224,14 @@ function Shell({ user, onLogout }) {
           className="flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-slate-500 shadow-sm"
           onClick={openAiSwitcher}
         >
-          <span className={`h-2 w-2 rounded-full ${aiDotClass}`} />
+          <span className="relative flex h-2 w-2">
+            {aiHealthy ? (
+              <span
+                className={`absolute inline-flex h-full w-full rounded-full ${aiDotClass} opacity-60 animate-ping motion-reduce:animate-none`}
+              />
+            ) : null}
+            <span className={`relative inline-flex h-2 w-2 rounded-full ${aiDotClass}`} />
+          </span>
           {aiPillLabel}
         </button>
       </header>
@@ -255,7 +263,7 @@ function Shell({ user, onLogout }) {
 
       {!hideTabBar ? (
         <div className="fixed bottom-0 left-0 right-0 flex justify-center pb-[env(safe-area-inset-bottom)]">
-          <div className="w-full max-w-[430px] bg-white/95 px-6 py-3 shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur">
+          <div className="w-full max-w-[430px] bg-white/80 px-6 py-3 shadow-[0_-10px_30px_rgba(0,0,0,0.04)] backdrop-blur">
             <TabBar activeKey={activeKey} onChange={(key) => navigate(key)}>
               {tabs.map((tab) => (
                 <TabBar.Item key={tab.key} icon={tab.icon} title={tab.title} />

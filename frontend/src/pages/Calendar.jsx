@@ -6,10 +6,10 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getStudyLogs, getTaskOccurrences } from '../services/api.js'
 
 function getHeatColor(duration) {
-  if (duration <= 0) return '#f3f4f6'
-  if (duration <= 60) return '#dcfce7'
-  if (duration <= 180) return '#86efac'
-  return '#22c55e'
+  if (duration <= 0) return 'rgba(15, 23, 42, 0.04)'
+  if (duration <= 60) return 'var(--cs-success-1)'
+  if (duration <= 180) return 'var(--cs-success-2)'
+  return 'var(--cs-success-3)'
 }
 
 const WEEKLY_GOAL_MINUTES = 600
@@ -259,19 +259,19 @@ function Calendar({ user, syncTick }) {
         }
         className="rounded-2xl border border-slate-100 bg-white shadow-sm"
       >
-        <div className="mb-1 grid grid-cols-7 gap-2 text-center text-[11px] font-medium text-slate-400">
+        <div className="mb-1 grid grid-cols-7 gap-4 text-center text-[11px] font-medium text-slate-400">
           {WEEKDAY_HEADERS.map((label) => (
             <span key={label}>{label}</span>
           ))}
         </div>
-        <div className="grid grid-cols-7 gap-2">
+        <div className="grid grid-cols-7 gap-4">
           {days.map((day) => (
             <button
               key={day.date}
               type="button"
               onClick={() => handleSelect(day)}
               disabled={!day.inMonth || loading}
-              className={`flex h-10 w-full items-center justify-center rounded-lg text-xs font-semibold ${
+              className={`flex h-8 w-full items-center justify-center rounded-[4px] text-xs font-semibold ${
                 day.inMonth ? 'text-slate-700' : 'text-slate-300'
               }`}
               style={{ backgroundColor: getHeatColor(day.duration) }}

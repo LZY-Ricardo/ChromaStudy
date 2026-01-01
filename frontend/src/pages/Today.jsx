@@ -18,7 +18,7 @@ import {
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GripVertical, PencilLine, Trash2, Share2, Calendar, AlertCircle, Clock } from 'lucide-react'
+import { GripVertical, PencilLine, Trash2, Share2, Calendar, AlertCircle, Clock, ListTodo } from 'lucide-react'
 import {
   checkin,
   createTask,
@@ -1484,7 +1484,18 @@ function Today({ user, syncTick }) {
         className="rounded-2xl border border-slate-100 bg-white shadow-sm"
       >
         {taskItems.length === 0 ? (
-          <p className="text-sm text-slate-500">还没有任务，先创建一个吧。</p>
+          <div className="flex flex-col items-center justify-center gap-4 py-6 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">
+              <ListTodo size={28} strokeWidth={1.5} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-700">还没有任务</p>
+              <p className="mt-2 text-xs text-slate-500">先添加一个任务，让今天更有方向。</p>
+            </div>
+            <Button size="small" color="primary" onClick={() => setTaskOpen(true)}>
+              添加任务
+            </Button>
+          </div>
         ) : (
           <>
             {/* 渲染按日期分组的任务 */}

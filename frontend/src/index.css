@@ -1,13 +1,35 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700&display=swap');
 @import "tailwindcss";
 
 :root {
   color-scheme: light;
-  font-family: "Manrope", "Segoe UI", sans-serif;
+  --cs-bg: #f8f9fa;
+  --cs-surface: #ffffff;
+  --cs-text: #1a1a1a;
+  --cs-text-muted: #475569;
+  --cs-border-subtle: rgba(15, 23, 42, 0.08);
+  --cs-shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.04);
+  --cs-shadow-soft-hover: 0 16px 40px rgba(0, 0, 0, 0.06);
+  --cs-primary: #1b3fd1;
+  --cs-success-0: #eefbf4;
+  --cs-success-1: #d4f6e4;
+  --cs-success-2: #9feac8;
+  --cs-success-3: #2aa870;
+  --adm-color-primary: var(--cs-primary);
+  --adm-color-success: var(--cs-success-3);
+  --adm-color-text: var(--cs-text);
+  --adm-color-text-secondary: var(--cs-text-muted);
+  --adm-color-weak: #64748b;
+  --adm-color-border: var(--cs-border-subtle);
+  --adm-color-background-body: var(--cs-bg);
+  --adm-font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #0f172a;
-  background-color: #f9fafb;
+  color: var(--cs-text);
+  background-color: var(--cs-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -23,8 +45,13 @@ body {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
-  background-color: #f9fafb;
-  background-image: radial-gradient(900px 520px at 12% -10%, #dbeafe 0%, rgba(249, 250, 251, 0.6) 55%, #fef3c7 100%);
+  background-color: var(--cs-bg);
+  background-image: radial-gradient(
+    980px 560px at 12% -10%,
+    rgba(27, 63, 209, 0.16) 0%,
+    rgba(248, 249, 250, 0.86) 55%,
+    rgba(236, 254, 255, 0.34) 100%
+  );
   color: inherit;
 }
 
@@ -41,11 +68,11 @@ body {
   max-width: 430px;
   height: 100%;
   min-height: 0;
-  padding: 24px 20px 0;
+  padding: 24px 24px 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
-  background-color: rgba(249, 250, 251, 0.92);
+  background-color: rgba(248, 249, 250, 0.88);
   backdrop-filter: blur(10px);
   overflow: hidden;
 }
@@ -65,7 +92,88 @@ body {
 }
 
 .display-font {
-  font-family: "Space Grotesk", "Manrope", sans-serif;
+  font-family: "Playfair Display", "Inter", serif;
+  letter-spacing: -0.02em;
+}
+
+/* antd-mobile: card & button polish */
+.adm-card {
+  --adm-card-padding-inline: 24px;
+  --adm-card-header-gap: 12px;
+  background: var(--cs-surface);
+  border: none;
+  box-shadow: var(--cs-shadow-soft);
+  transition: box-shadow 200ms ease, transform 200ms ease;
+}
+
+@media (hover: hover) {
+  .adm-card:hover {
+    box-shadow: var(--cs-shadow-soft-hover);
+    transform: translateY(-1px);
+  }
+}
+
+.adm-card-header:not(:last-child) {
+  border-bottom: none;
+}
+
+.adm-card-header {
+  padding-top: 24px;
+  padding-bottom: 16px;
+}
+
+.adm-card-body {
+  padding-top: 24px;
+  padding-bottom: 24px;
+}
+
+.adm-card-header + .adm-card-body {
+  padding-top: 16px;
+}
+
+.adm-button {
+  font-weight: 600;
+  border-radius: 12px;
+  transition: transform 120ms ease, box-shadow 200ms ease, opacity 150ms ease;
+}
+
+.adm-button:active {
+  transform: translateY(0.5px);
+}
+
+.adm-button.adm-button-mini {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.adm-button.adm-button-small {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.adm-button-default.adm-button-fill-outline {
+  --background-color: rgba(15, 23, 42, 0.04);
+  --border-color: transparent;
+  --adm-button-text-color: rgba(15, 23, 42, 0.72);
+}
+
+.adm-button-primary:not(.adm-button-fill-outline):not(.adm-button-fill-none) {
+  background-image: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.18),
+    rgba(255, 255, 255, 0)
+  );
+  box-shadow: 0 10px 24px rgba(27, 63, 209, 0.18);
+}
+
+.adm-button-primary:not(.adm-button-fill-outline):not(.adm-button-fill-none):active {
+  box-shadow: none;
+}
+
+.adm-progress-bar {
+  --adm-progress-bar-track-color: rgba(15, 23, 42, 0.06);
+  --adm-progress-bar-track-width: 12px;
+  --adm-progress-bar-fill-color: linear-gradient(90deg, var(--cs-success-2), var(--cs-success-3));
 }
 
 /* 分享卡片样式选择器 */
@@ -98,7 +206,7 @@ body {
 }
 
 .share-style-tab.active {
-  background: #667eea;
+  background: var(--cs-primary);
   color: white;
 }
 
