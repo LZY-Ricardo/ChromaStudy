@@ -1509,18 +1509,18 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
               <span className="pill-badge-sm pill-badge-primary">{pendingCount}</span>
             )}
           </div>
-          <div className="px-3 pb-3">
+          <div className="px-3 pb-3 flex flex-col gap-4">
             <Button
               block
               size="small"
               color="primary"
               disabled={syncing || pendingCount <= 0}
               onClick={() => onSyncNow?.()}
-              className="!rounded-full mb-3"
+              className="!rounded-full"
             >
               {syncing ? '同步中...' : pendingCount > 0 ? '立即同步' : '暂无待同步'}
             </Button>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <Button
                 block
                 size="small"
@@ -1602,20 +1602,22 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
             <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">通知</p>
           </div>
           <div className="px-3 pb-3 space-y-2">
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-2">
               <Button
+                block
                 size="small"
                 fill="outline"
                 onClick={requestNotificationPermission}
-                className="!rounded-full !overflow-hidden !text-ellipsis"
+                className="!rounded-full"
               >
                 开启权限
               </Button>
               <Button
+                block
                 size="small"
                 color="primary"
                 onClick={sendTestNotification}
-                className="!rounded-full !overflow-hidden !text-ellipsis"
+                className="!rounded-full"
               >
                 测试通知
               </Button>
