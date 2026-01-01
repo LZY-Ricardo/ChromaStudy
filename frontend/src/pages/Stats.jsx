@@ -185,19 +185,34 @@ function Stats({ user, syncTick }) {
 
   return (
     <div className="space-y-4">
-      <Card className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Streak</p>
-            <p className="display-font text-3xl font-semibold text-slate-900">{streakDays} days</p>
-            <p className="mt-1 text-xs text-slate-500">口径：当日 duration &gt; 0</p>
+      {/* Bento Grid Top Row - Streak + Share */}
+      <div className="bento-grid bento-grid-2-uneven">
+        {/* Streak Card - Primary Gradient */}
+        <Card className="bento-card bento-card-primary !border-0 !shadow-md">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-white/70 font-medium">Streak</p>
+              <p className="display-font text-3xl font-semibold text-white mt-1">{streakDays}</p>
+              <p className="text-xs text-white/70 mt-0.5">天连续打卡</p>
+            </div>
+            <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center">
+              <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
+              </svg>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+        </Card>
+
+        {/* Share Actions */}
+        <Card className="bento-card bento-card-compact !p-3">
+          <div className="flex flex-col gap-2">
             <Button
               size="small"
               fill="outline"
               onClick={() => navigate('/settings')}
               disabled={loading}
+              className="!rounded-full"
             >
               修改周目标
             </Button>
@@ -206,96 +221,151 @@ function Stats({ user, syncTick }) {
               fill="outline"
               onClick={handleShare}
               disabled={loading || streakDays === 0}
+              className="!rounded-full"
             >
-              <Share2 size={16} />
+              <Share2 size={14} className="mr-1" />
+              分享
             </Button>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </div>
 
-      <Card title="This Week" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <div className="flex items-end justify-between">
-          <div>
-            <p className="display-font text-2xl font-semibold text-slate-900">
-              {weeklyMinutes}/{weeklyGoal} min
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              {weekRange.start.format('YYYY-MM-DD')} ~ {weekRange.end.format('YYYY-MM-DD')}
-            </p>
+      {/* Week Overview Card */}
+      <Card className="bento-card">
+        <div className="flex items-center justify-between p-3 pb-2">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
+              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">本周学习</p>
           </div>
-          <div className="text-sm font-semibold text-slate-700">
-            {Math.round(weeklyProgress * 100)}%
+          <div className="text-right">
+            <p className="display-font text-lg font-semibold text-slate-900">
+              {weeklyMinutes}/{weeklyGoal}
+            </p>
+            <p className="text-[10px] text-slate-400">{weekRange.start.format('MM-DD')} ~ {weekRange.end.format('MM-DD')}</p>
           </div>
         </div>
 
-        <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-slate-100/80 shadow-inner">
-          <div
-            className="h-full rounded-full"
-            style={{
-              width: `${weeklyProgress * 100}%`,
-              background: 'linear-gradient(90deg, var(--cs-success-2), var(--cs-success-3))',
-            }}
-          />
-        </div>
+        <div className="px-3 pb-3">
+          {/* Progress Bar */}
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] text-slate-400">周目标进度</span>
+              <span className="text-xs font-semibold text-emerald-600">{Math.round(weeklyProgress * 100)}%</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500"
+                style={{ width: `${weeklyProgress * 100}%` }}
+              />
+            </div>
+          </div>
 
-        <div className="mt-4 h-28">
-          <div className="grid h-full grid-cols-7 gap-2">
-            {weekDays.map((day) => (
-              <div key={day.key} className="flex flex-col items-center justify-end gap-2">
-                <div className="flex h-full w-full items-end">
-                  <div
-                    className="w-full rounded-lg bg-emerald-500/90"
-                    style={{ height: `${Math.max(6, Math.round((day.minutes / weekMax) * 100))}%` }}
-                    title={`${day.key} · ${day.minutes} min`}
-                  />
+          {/* Week Bar Chart */}
+          <div className="h-24">
+            <div className="grid h-full grid-cols-7 gap-1.5">
+              {weekDays.map((day) => (
+                <div key={day.key} className="flex flex-col items-center justify-end gap-1">
+                  <div className="flex h-full w-full items-end">
+                    <div
+                      className="w-full rounded-t-md bg-gradient-to-t from-emerald-500 to-emerald-400"
+                      style={{ height: `${Math.max(4, Math.round((day.minutes / weekMax) * 100))}%` }}
+                      title={`${day.key} · ${day.minutes} min`}
+                    />
+                  </div>
+                  <span className="text-[9px] font-medium text-slate-400">{day.label}</span>
                 </div>
-                <div className="text-[10px] font-semibold text-slate-500">{day.label}</div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       </Card>
 
-      <Card title="This Month" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">{monthRange.label}</p>
-            <p className="display-font text-2xl font-semibold text-slate-900">
-              {monthSummary.total} min
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              活跃天数 {monthSummary.activeDays} · 活跃日均 {monthSummary.avg} 分钟
-            </p>
+      {/* Month Summary Card */}
+      <Card className="bento-card">
+        <div className="flex items-center justify-between p-3 pb-2">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">本月概览</p>
           </div>
-          <Button size="small" onClick={() => navigate('/calendar')} disabled={loading}>
+          <Button size="mini" onClick={() => navigate('/calendar')} disabled={loading} className="!rounded-full">
             看日历
           </Button>
         </div>
 
-        <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
-          <p>
-            最佳日：{monthSummary.best.date || '—'}（{monthSummary.best.minutes} 分钟）
-          </p>
+        <div className="px-3 pb-3">
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <div className="bg-slate-50 rounded-xl p-2.5 text-center">
+              <p className="stat-value text-lg">{monthSummary.total}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">总分钟</p>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-2.5 text-center">
+              <p className="stat-value text-lg">{monthSummary.activeDays}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">活跃天</p>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-2.5 text-center">
+              <p className="stat-value text-lg">{monthSummary.avg}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">日均</p>
+            </div>
+          </div>
+
+          <div className="bg-emerald-50 rounded-xl px-3 py-2 flex items-center justify-between">
+            <span className="text-xs text-emerald-700">最佳日</span>
+            <span className="text-sm font-semibold text-emerald-800">
+              {monthSummary.best.date || '—'}（{monthSummary.best.minutes} min）
+            </span>
+          </div>
         </div>
       </Card>
 
-      <Card title="AI 周报 / 月报" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <p className="text-sm text-slate-500">
-          基于你本周/本月的学习记录生成总结与建议（不保存到数据库）。
-        </p>
-        <div className="mt-4 flex items-center gap-3">
-          <Button block color="primary" onClick={() => requestReport('weekly')} disabled={reportLoading}>
-            {reportLoading ? '生成中...' : '生成周报'}
-          </Button>
-          <Button block fill="outline" onClick={() => requestReport('monthly')} disabled={reportLoading}>
-            {reportLoading ? '生成中...' : '生成月报'}
-          </Button>
+      {/* AI Report Card */}
+      <Card className="bento-card !bg-gradient-to-br from-violet-50 to-indigo-50 !border-violet-100">
+        <div className="flex items-center gap-2 p-3 pb-2">
+          <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <p className="text-xs font-semibold text-violet-700 uppercase tracking-wider">AI 报告</p>
         </div>
-        {reportData?.report ? (
-          <p className="mt-3 line-clamp-3 text-xs text-slate-400">
-            最近一次：{reportData.type} {reportData.periodStart}~{reportData.periodEnd}
+
+        <div className="px-3 pb-3">
+          <p className="text-sm text-slate-600">
+            基于你本周/本月的学习记录生成总结与建议
           </p>
-        ) : null}
+          <div className="mt-3 flex items-center gap-2">
+            <Button
+              block
+              color="primary"
+              onClick={() => requestReport('weekly')}
+              disabled={reportLoading}
+              className="!rounded-full"
+            >
+              {reportLoading ? '生成中...' : '生成周报'}
+            </Button>
+            <Button
+              block
+              fill="outline"
+              onClick={() => requestReport('monthly')}
+              disabled={reportLoading}
+              className="!rounded-full"
+            >
+              {reportLoading ? '生成中...' : '生成月报'}
+            </Button>
+          </div>
+          {reportData?.report ? (
+            <p className="mt-2 text-[10px] text-slate-400">
+              最近一次：{reportData.type} · {reportData.periodStart} ~ {reportData.periodEnd}
+            </p>
+          ) : null}
+        </div>
       </Card>
 
       <ShareDialog

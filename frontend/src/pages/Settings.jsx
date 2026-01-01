@@ -1462,9 +1462,18 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
 
   return (
     <div className="space-y-4">
-      <Card title="Profile" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <div className="space-y-3">
-          <p className="text-sm text-slate-600">用户：{user?.username ?? 'unknown'}</p>
+      {/* Profile Card - Bento Style */}
+      <Card className="bento-card">
+        <div className="flex items-center gap-2 p-3 pb-2">
+          <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+          </div>
+          <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">用户资料</p>
+        </div>
+        <div className="px-3 pb-3">
+          <p className="text-sm text-slate-600 mb-3">用户：{user?.username ?? 'unknown'}</p>
           <Button
             block
             color="warning"
@@ -1473,73 +1482,87 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
               onLogout?.()
               Toast.show({ content: '已退出登录' })
             }}
+            className="!rounded-full"
           >
             退出登录 / 切换账号
           </Button>
         </div>
       </Card>
 
-      <Card title="Sync" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <div className="space-y-3">
-          <div className="text-sm text-slate-600">
-            待同步：{pendingCount} 项
-            {typeof navigator !== 'undefined' && !navigator.onLine ? '（离线）' : ''}
+      {/* Sync Card - Bento Style */}
+      <Card className="bento-card">
+        <div className="flex items-center justify-between p-3 pb-2">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">数据同步</p>
           </div>
+          <span className="pill-badge-sm pill-badge-primary">{pendingCount} 项待同步</span>
+        </div>
+        <div className="px-3 pb-3 space-y-3">
           {lastSync ? (
-            <div className="space-y-1">
-              <p className="text-xs text-slate-400">
-                上次同步：{lastSyncLabel || '未知'} · 成功 {lastSync.succeeded}/{lastSync.processed} · 失败{' '}
-                {lastSync.failed}
-                {lastSync.blocked === 'conflict'
-                  ? ' · 已暂停：需要处理冲突'
-                  : lastSync.blocked === 'network'
-                    ? ' · 已暂停：网络不可用'
-                    : ''}
+            <div className="bg-slate-50 rounded-xl px-3 py-2">
+              <p className="text-[10px] text-slate-400">
+                上次：{lastSyncLabel || '未知'} · 成功 {lastSync.succeeded}/{lastSync.processed} · 失败 {lastSync.failed}
               </p>
               {lastSync.blocked === 'conflict' && blockedOp ? (
-                <p className="text-xs text-amber-600">
-                  阻塞项：{formatOpTitle(blockedOp)} {formatOpSummary(blockedOp)}{' '}
-                  {lastSync.blockedError ? `· ${lastSync.blockedError}` : ''}
+                <p className="text-[10px] text-amber-600 mt-1">
+                  阻塞：{formatOpTitle(blockedOp)} {formatOpSummary(blockedOp)}
                 </p>
               ) : null}
             </div>
           ) : (
-            <p className="text-xs text-slate-400">尚未执行过同步</p>
+            <p className="text-[10px] text-slate-400">尚未执行过同步</p>
           )}
 
-          <Button
-            block
-            color="primary"
-            disabled={syncing || pendingCount <= 0}
-            onClick={() => onSyncNow?.()}
-          >
-            {syncing ? '同步中...' : pendingCount > 0 ? '立即同步' : '暂无待同步'}
-          </Button>
-
-          <Button
-            block
-            fill="outline"
-            disabled={syncing || (pendingCount <= 0 && !blockedOp)}
-            onClick={() => setPendingOpen(true)}
-          >
-            查看待同步详情
-          </Button>
-          <Button
-            block
-            fill="outline"
-            color="warning"
-            disabled={syncing || pendingCount <= 0}
-            onClick={clearQueue}
-          >
-            丢弃未同步更改
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button
+              block
+              color="primary"
+              disabled={syncing || pendingCount <= 0}
+              onClick={() => onSyncNow?.()}
+              className="!rounded-full"
+            >
+              {syncing ? '同步中...' : pendingCount > 0 ? '立即同步' : '暂无待同步'}
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                block
+                fill="outline"
+                disabled={syncing || (pendingCount <= 0 && !blockedOp)}
+                onClick={() => setPendingOpen(true)}
+                className="!rounded-full"
+              >
+                详情
+              </Button>
+              <Button
+                block
+                fill="outline"
+                color="warning"
+                disabled={syncing || pendingCount <= 0}
+                onClick={clearQueue}
+                className="!rounded-full"
+              >
+                清空
+              </Button>
+            </div>
+          </div>
         </div>
       </Card>
 
-      <Card
-        title="Habit"
-        className="rounded-2xl border border-slate-100 bg-white shadow-sm"
-      >
+      {/* Habit Card - Bento Style */}
+      <Card className="bento-card">
+        <div className="flex items-center gap-2 p-3 pb-2">
+          <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+            </svg>
+          </div>
+          <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">周目标</p>
+        </div>
         <List>
           <List.Item>
             <Input
@@ -1552,7 +1575,7 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
             />
           </List.Item>
         </List>
-        <div className="mt-3">
+        <div className="px-3 pb-3">
           <Button
             block
             fill="outline"
@@ -1565,16 +1588,23 @@ function Settings({ user, onLogout, syncing, lastSync, onSyncNow }) {
               saveWeeklyGoal(user?.id, minutes)
               Toast.show({ content: '周目标已保存' })
             }}
+            className="!rounded-full"
           >
             保存周目标
           </Button>
-          <p className="mt-2 text-xs text-slate-400">
-            首次默认 300 分钟/周，可随时调整。
-          </p>
         </div>
       </Card>
 
-      <Card title="AI Provider" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
+      {/* AI Provider Card - Bento Style */}
+      <Card className="bento-card">
+        <div className="flex items-center gap-2 p-3 pb-2">
+          <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
+            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">AI 设置</p>
+        </div>
         <div className="space-y-3">
           <div className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
             配置档案

@@ -212,28 +212,31 @@ function Shell({ user, onLogout }) {
 
   return (
     <div className={shellClassName}>
-      <header className="flex items-center justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">ChromaStudy</p>
-          <h1 className="display-font text-2xl font-bold text-slate-900">
-            Focus. Log. Level up.
-          </h1>
+      {/* Bento-style Header */}
+      <header className="bento-card bento-card-compact p-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-semibold">ChromaStudy</p>
+            <h1 className="display-font text-lg font-bold text-slate-900 leading-tight">
+              Focus. Log. Level up.
+            </h1>
+          </div>
+          <button
+            type="button"
+            className="icon-btn !w-auto !rounded-full px-3 gap-2 !text-xs"
+            onClick={openAiSwitcher}
+          >
+            <span className="relative flex h-2 w-2">
+              {aiHealthy ? (
+                <span
+                  className={`absolute inline-flex h-full w-full rounded-full ${aiDotClass} opacity-60 animate-ping motion-reduce:animate-none`}
+                />
+              ) : null}
+              <span className={`relative inline-flex h-2 w-2 rounded-full ${aiDotClass}`} />
+            </span>
+            {aiPillLabel}
+          </button>
         </div>
-        <button
-          type="button"
-          className="flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-slate-500 shadow-sm"
-          onClick={openAiSwitcher}
-        >
-          <span className="relative flex h-2 w-2">
-            {aiHealthy ? (
-              <span
-                className={`absolute inline-flex h-full w-full rounded-full ${aiDotClass} opacity-60 animate-ping motion-reduce:animate-none`}
-              />
-            ) : null}
-            <span className={`relative inline-flex h-2 w-2 rounded-full ${aiDotClass}`} />
-          </span>
-          {aiPillLabel}
-        </button>
       </header>
 
       <main className="app-main flex-1 min-h-0">
@@ -263,7 +266,7 @@ function Shell({ user, onLogout }) {
 
       {!hideTabBar ? (
         <div className="fixed bottom-0 left-0 right-0 flex justify-center pb-[env(safe-area-inset-bottom)]">
-          <div className="w-full max-w-[430px] bg-white/80 px-6 py-3 shadow-[0_-10px_30px_rgba(0,0,0,0.04)] backdrop-blur">
+          <div className="w-full max-w-107.5 bg-white/90 px-4 py-2.5 shadow-[0_-8px_24px_rgba(0,0,0,0.06)] backdrop-blur-md border-t border-slate-100/50">
             <TabBar activeKey={activeKey} onChange={(key) => navigate(key)}>
               {tabs.map((tab) => (
                 <TabBar.Item key={tab.key} icon={tab.icon} title={tab.title} />

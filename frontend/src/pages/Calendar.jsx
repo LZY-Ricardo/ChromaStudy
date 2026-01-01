@@ -180,107 +180,137 @@ function Calendar({ user, syncTick }) {
 
   return (
     <div className="space-y-4">
-      <Card title="学习总览" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <div className="space-y-1">
-            <p className="text-xs text-slate-500">本月总时长</p>
-            <p className="text-lg font-semibold text-slate-800">{monthStats.totalMinutes} 分钟</p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-slate-500">日均</p>
-            <p className="text-lg font-semibold text-slate-800">{monthStats.avgMinutes} 分钟</p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-slate-500">最佳日</p>
-            <p className="text-lg font-semibold text-slate-800">
-              {monthStats.bestDuration ? `${monthStats.bestDuration} 分钟` : '—'}
-            </p>
-            <p className="text-[11px] text-slate-400">{monthStats.bestDate || '暂无'}</p>
-          </div>
-        </div>
-        <div className="mt-3 flex items-center gap-3">
-          <div className="rounded-xl bg-emerald-50 px-3 py-2">
-            <p className="text-[11px] text-emerald-600">连续打卡</p>
-            <p className="text-base font-semibold text-emerald-700">{streak} 天</p>
-          </div>
-          <div className="flex-1">
-            <div className="mb-1 flex items-center justify-between text-[11px] text-slate-500">
-              <span>本周进度</span>
-              <span>
-                {weeklyProgress.minutes} / {WEEKLY_GOAL_MINUTES} 分钟
-              </span>
-            </div>
-            <ProgressBar percent={weeklyProgress.percent} />
-          </div>
-        </div>
-        <div className="mt-3 flex items-end gap-1">
-          {recentTrend.data.map((val, idx) => {
-            const height = recentTrend.max ? Math.max(12, Math.round((val / recentTrend.max) * 48)) : 12
-            return (
-              <div key={idx} className="flex-1">
-                <div
-                  className="w-full rounded-t-md bg-emerald-400"
-                  style={{ height, opacity: 0.3 + (val > 0 ? 0.5 : 0) }}
-                />
-                <p className="mt-1 text-center text-[11px] text-slate-400">{idx === 6 ? '今' : ''}</p>
-              </div>
-            )
-          })}
-        </div>
-      </Card>
+      {/* Bento Grid Stats Cards */}
+      <div className="bento-grid bento-grid-3">
+        {/* Month Total */}
+        <Card className="bento-card bento-card-compact !p-3">
+          <p className="stat-label text-slate-400">本月总时长</p>
+          <p className="stat-value text-2xl mt-1">{monthStats.totalMinutes}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">分钟</p>
+        </Card>
 
-      <Card
-        title="Calendar Heatmap"
-        extra={
+        {/* Daily Average */}
+        <Card className="bento-card bento-card-compact !p-3">
+          <p className="stat-label text-slate-400">日均学习</p>
+          <p className="stat-value text-2xl mt-1">{monthStats.avgMinutes}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">分钟/天</p>
+        </Card>
+
+        {/* Best Day */}
+        <Card className="bento-card bento-card-compact !p-3">
+          <p className="stat-label text-slate-400">最佳日</p>
+          <p className="stat-value text-2xl mt-1">{monthStats.bestDuration || '—'}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5 truncate">{monthStats.bestDate || '暂无'}</p>
+        </Card>
+      </div>
+
+      {/* Streak & Progress Row */}
+      <div className="bento-grid bento-grid-2">
+        {/* Streak Card */}
+        <Card className="bento-card bento-card-success !p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-white/80">连续打卡</p>
+              <p className="display-font text-3xl font-semibold text-white mt-1">{streak}</p>
+              <p className="text-xs text-white/70 mt-0.5">天</p>
+            </div>
+            <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center">
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
+              </svg>
+            </div>
+          </div>
+        </Card>
+
+        {/* Weekly Progress Card */}
+        <Card className="bento-card !p-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="stat-label text-slate-400">本周进度</p>
+            <p className="text-xs text-slate-500">
+              {weeklyProgress.minutes} / {WEEKLY_GOAL_MINUTES}
+            </p>
+          </div>
+          <ProgressBar percent={weeklyProgress.percent} />
+          <div className="flex items-end gap-0.5 mt-3">
+            {recentTrend.data.map((val, idx) => {
+              const height = recentTrend.max ? Math.max(8, Math.round((val / recentTrend.max) * 32)) : 8
+              return (
+                <div key={idx} className="flex-1">
+                  <div
+                    className="w-full rounded-t-sm bg-emerald-400"
+                    style={{ height, opacity: 0.25 + (val > 0 ? 0.5 : 0) }}
+                  />
+                  <p className="mt-1 text-center text-[9px] text-slate-400">{idx === 6 ? '今' : ''}</p>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      </div>
+
+      {/* Calendar Heatmap Card */}
+      <Card className="bento-card">
+        <div className="flex items-center justify-between p-3 pb-2">
           <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
+              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">学习日历</p>
+          </div>
+          <div className="flex items-center gap-1">
             <Button
-              size="small"
+              size="mini"
               fill="outline"
               onClick={() => setMonthCursor((prev) => prev.subtract(1, 'month'))}
               disabled={loading}
+              className="!rounded-full"
             >
-              <ChevronLeft size={16} />
+              <ChevronLeft size={14} />
             </Button>
-            <div className="min-w-[6.5rem] text-center text-sm font-semibold text-slate-700">
+            <span className="min-w-[5rem] text-center text-sm font-semibold text-slate-700">
               {monthCursor.format('YYYY-MM')}
-            </div>
-            <Button size="small" fill="outline" onClick={handleToday} disabled={loading}>
+            </span>
+            <Button size="mini" fill="outline" onClick={handleToday} disabled={loading} className="!rounded-full">
               今天
             </Button>
             <Button
-              size="small"
+              size="mini"
               fill="outline"
               onClick={() => setMonthCursor((prev) => prev.add(1, 'month'))}
               disabled={loading}
+              className="!rounded-full"
             >
-              <ChevronRight size={16} />
+              <ChevronRight size={14} />
             </Button>
           </div>
-        }
-        className="rounded-2xl border border-slate-100 bg-white shadow-sm"
-      >
-        <div className="mb-1 grid grid-cols-7 gap-4 text-center text-[11px] font-medium text-slate-400">
-          {WEEKDAY_HEADERS.map((label) => (
-            <span key={label}>{label}</span>
-          ))}
         </div>
-        <div className="grid grid-cols-7 gap-4">
-          {days.map((day) => (
-            <button
-              key={day.date}
-              type="button"
-              onClick={() => handleSelect(day)}
-              disabled={!day.inMonth || loading}
-              className={`flex h-8 w-full items-center justify-center rounded-[4px] text-xs font-semibold ${
-                day.inMonth ? 'text-slate-700' : 'text-slate-300'
-              }`}
-              style={{ backgroundColor: getHeatColor(day.duration) }}
-            >
-              {day.label}
-            </button>
-          ))}
+        <div className="px-3 pb-2">
+          <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[10px] font-medium text-slate-400">
+            {WEEKDAY_HEADERS.map((label) => (
+              <span key={label}>{label}</span>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {days.map((day) => (
+              <button
+                key={day.date}
+                type="button"
+                onClick={() => handleSelect(day)}
+                disabled={!day.inMonth || loading}
+                className={`heatmap-cell !rounded-lg text-[11px] font-semibold ${
+                  day.inMonth ? 'text-slate-700' : 'text-slate-300'
+                }`}
+                style={{ backgroundColor: getHeatColor(day.duration) }}
+              >
+                {day.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] text-slate-400 text-center">绿色越深代表当日学习时长越多</p>
         </div>
-        <p className="mt-3 text-xs text-slate-400">绿色越深代表当日学习时长越多。</p>
       </Card>
 
       <Popup

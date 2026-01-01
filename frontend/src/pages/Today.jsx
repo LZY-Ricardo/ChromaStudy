@@ -1308,181 +1308,188 @@ function Today({ user, syncTick }) {
 
   return (
     <div className="space-y-4">
-      <Card className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Today</p>
-            <p className="display-font text-xl font-semibold text-slate-900">{todayLabel}</p>
-            <p className="mt-1 text-xs text-slate-500">
-              {todayLog
-                ? `已学习 ${todayLog.duration} 分钟`
-                : loading
-                  ? '正在同步打卡状态'
-                  : '今日尚未打卡'}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Tag color={todayLog ? 'success' : 'warning'} fill="outline">
-              {completedCount}/{taskItems.length} done
-            </Tag>
-            <Button
-              size="small"
-              fill="outline"
-              onClick={handleShare}
-              disabled={!todayLog || todayLog.duration <= 0}
-            >
-              <Share2 size={16} />
-            </Button>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">This Week</p>
-            <p className="display-font text-xl font-semibold text-slate-900">
-              {weeklyMinutes}/{weeklyGoalMinutes} min
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              连续打卡 {streakDays} 天 · 周区间 {weekRange.start} ~ {weekRange.end}
-            </p>
-          </div>
-          <Tag color={weeklyMinutes >= weeklyGoalMinutes ? 'success' : 'primary'} fill="outline">
-            {Math.min(100, Math.round((weeklyMinutes / weeklyGoalMinutes) * 100))}%
-          </Tag>
-        </div>
-        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-          <div
-            className="h-full rounded-full bg-emerald-500"
-            style={{
-              width: `${Math.min(100, Math.round((weeklyMinutes / weeklyGoalMinutes) * 100))}%`,
-            }}
-          />
-        </div>
-        <p className="mt-2 text-xs text-slate-400">周目标可在 Settings → Habit 修改。</p>
-      </Card>
-
-      <Card title="Focus (Pomodoro)" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <p className="text-sm text-slate-500">
-          默认 25/5，专注结束可一键记录到今天。
-        </p>
-        <div className="mt-4 flex items-center gap-3">
-          <Button block color="primary" size="large" onClick={() => navigate('/focus')}>
-            开始专注
-          </Button>
-          <Button block fill="outline" size="large" onClick={() => navigate('/stats')}>
-            查看统计
-          </Button>
-        </div>
-      </Card>
-
-      <Card title="答题复习" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <p className="text-sm text-slate-500">
-          今日待复习 <span className="font-semibold text-slate-900">{dueReviewCount}</span> 题 ·
-          每天 3~10 分钟巩固学习内容。
-        </p>
-        <div className="mt-4 flex items-center gap-3">
-          <Button block color="primary" size="large" onClick={() => navigate('/review')} disabled={dueReviewCount === 0}>
-            {dueReviewCount ? `开始复习（${dueReviewCount}）` : '暂无到期题卡'}
-          </Button>
-          <Button
-            block
-            fill="outline"
-            size="large"
-            onClick={() => navigate(`/review?date=${defaultReviewSourceDate}`)}
-          >
-            生成题卡
-          </Button>
-        </div>
-        <p className="mt-2 text-xs text-slate-400">复习耗时会计入今天学习时长（用于周目标与 streak）。</p>
-      </Card>
-
-      <Card title="AI 任务拆解" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        <p className="text-sm text-slate-500">
-          给一个目标，让 AI 拆成可执行任务，然后一键加入任务列表。
-        </p>
-        <div className="mt-4">
-          <Button block fill="outline" size="large" onClick={() => setAiDecomposeOpen(true)}>
-            拆解目标
-          </Button>
-        </div>
-      </Card>
-
-      <Card title="AI 点评" className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-        {todayLog?.duration > 0 ? (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-700">
-              {todayLog.aiFeedback === null
-                ? '点评生成中…'
-                : todayLog?.aiFeedback?.trim()
-                  ? todayLog.aiFeedback
-                  : '尚未生成点评（可手动生成）'}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button size="small" fill="outline" onClick={refreshTodayLog} disabled={loading}>
-                刷新
-              </Button>
+      {/* Bento Grid Top Section - Today + Week Summary */}
+      <div className="bento-grid bento-grid-2-uneven">
+        {/* Today Card - Primary */}
+        <Card className="bento-card bento-card-primary !border-0 !shadow-md">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-white/70 font-medium">Today</p>
+              <p className="display-font text-xl font-semibold text-white mt-0.5">{todayLabel}</p>
+              <p className="mt-2 text-xs text-white/80">
+                {todayLog
+                  ? `已学习 ${todayLog.duration} 分钟`
+                  : loading
+                    ? '正在同步打卡状态'
+                    : '今日尚未打卡'}
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Tag color="default" fill="outline" className="!bg-white/20 !text-white !border-white/30 !text-[11px]">
+                {completedCount}/{taskItems.length}
+              </Tag>
               <Button
                 size="small"
                 fill="outline"
-                onClick={generateTodayFeedback}
-                disabled={loading}
+                onClick={handleShare}
+                disabled={!todayLog || todayLog.duration <= 0}
+                className="!bg-white/20 !text-white !border-white/30"
               >
-                生成点评
-              </Button>
-              <Button
-                size="small"
-                color="primary"
-                onClick={() => navigate(`/day/${todayKey}`)}
-              >
-                查看详情
+                <Share2 size={14} />
               </Button>
             </div>
           </div>
-        ) : (
-          <p className="text-sm text-slate-500">完成一次打卡后会生成点评。</p>
-        )}
+        </Card>
+
+        {/* Week Progress Card */}
+        <Card className="bento-card !p-3">
+          <div className="text-center">
+            <p className="stat-label text-slate-400">本周进度</p>
+            <div className="mt-1">
+              <span className="stat-value text-xl">{weeklyMinutes}</span>
+              <span className="text-slate-400 text-sm">/{weeklyGoalMinutes}</span>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">连续打卡 {streakDays} 天</p>
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500"
+                style={{
+                  width: `${Math.min(100, Math.round((weeklyMinutes / weeklyGoalMinutes) * 100))}%`,
+                }}
+              />
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Bento Grid Quick Actions */}
+      <div className="bento-grid bento-grid-3">
+        {/* Focus Timer */}
+        <button
+          onClick={() => navigate('/focus')}
+          className="bento-card bento-card-compact p-3 text-left !border-slate-100 !shadow-sm hover:!shadow-md"
+        >
+          <div className="flex flex-col gap-1">
+            <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12.5 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 mt-1">专注</p>
+            <p className="text-[10px] text-slate-400">番茄钟</p>
+          </div>
+        </button>
+
+        {/* Review */}
+        <button
+          onClick={() => navigate('/review')}
+          disabled={dueReviewCount === 0}
+          className="bento-card bento-card-compact p-3 text-left !border-slate-100 !shadow-sm hover:!shadow-md disabled:opacity-50"
+        >
+          <div className="flex flex-col gap-1">
+            <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center text-white">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 mt-1">复习</p>
+            <p className="text-[10px] text-slate-400">{dueReviewCount} 题</p>
+          </div>
+        </button>
+
+        {/* AI Decompose */}
+        <button
+          onClick={() => setAiDecomposeOpen(true)}
+          className="bento-card bento-card-compact p-3 text-left !border-slate-100 !shadow-sm hover:!shadow-md"
+        >
+          <div className="flex flex-col gap-1">
+            <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center text-white">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 mt-1">AI拆解</p>
+            <p className="text-[10px] text-slate-400">任务</p>
+          </div>
+        </button>
+      </div>
+
+      {/* AI Feedback Card - Bento Style */}
+      <Card className="bento-card !bg-gradient-to-br from-violet-50 to-indigo-50 !border-violet-100">
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center">
+                <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <p className="text-xs font-semibold text-violet-700 uppercase tracking-wider">AI 点评</p>
+            </div>
+            {todayLog?.duration > 0 ? (
+              <p className="mt-2 text-sm text-slate-700 leading-relaxed">
+                {todayLog.aiFeedback === null
+                  ? '点评生成中…'
+                  : todayLog?.aiFeedback?.trim()
+                    ? todayLog.aiFeedback
+                    : '尚未生成点评（可手动生成）'}
+              </p>
+            ) : (
+              <p className="mt-2 text-sm text-slate-500">完成一次打卡后会生成点评。</p>
+            )}
+          </div>
+          <Button
+            size="mini"
+            onClick={() => navigate(`/day/${todayKey}`)}
+            className="!rounded-full"
+          >
+            详情
+          </Button>
+        </div>
       </Card>
 
-      <Card
-        title="任务列表"
-        extra={
+      {/* Task List - Bento Card */}
+      <Card className="bento-card">
+        <div className="flex items-center justify-between p-3 pb-2">
           <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center">
+              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">任务列表</p>
+            <Tag color="primary" fill="outline" className="!text-[10px]">
+              {completedCount}/{taskItems.length}
+            </Tag>
+          </div>
+          <div className="flex items-center gap-1">
             <Button
-              size="small"
+              size="mini"
               fill={taskViewMode === 'focus' ? 'solid' : 'outline'}
               color="primary"
               onClick={() => setTaskViewMode('focus')}
+              className="!rounded-full"
             >
               今日专注
             </Button>
             <Button
-              size="small"
+              size="mini"
               fill={taskViewMode === 'all' ? 'solid' : 'outline'}
               onClick={() => setTaskViewMode('all')}
+              className="!rounded-full"
             >
-              全部任务
+              全部
             </Button>
             <Button
-              size="small"
-              fill={manageTasks ? 'solid' : 'outline'}
-              color="primary"
-              onClick={() => setManageTasks((prev) => !prev)}
-            >
-              管理
-            </Button>
-            <Button
-              size="small"
+              size="mini"
               fill={showDoneTasks ? 'solid' : 'outline'}
               onClick={() => setShowDoneTasks((prev) => !prev)}
+              className="!rounded-full"
             >
               已完成
             </Button>
           </div>
-        }
-        className="rounded-2xl border border-slate-100 bg-white shadow-sm"
-      >
+        </div>
         {taskItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-4 py-6 text-center">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">
@@ -1813,7 +1820,16 @@ function Today({ user, syncTick }) {
 
       <Dialog
         visible={aiDecomposeOpen}
-        title="AI 任务拆解"
+        title={
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center">
+              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <span className="text-sm font-semibold text-slate-800">AI 任务拆解</span>
+          </div>
+        }
         closeOnMaskClick={!aiWorking}
         closeOnAction={false}
         onClose={() => {
@@ -1825,7 +1841,7 @@ function Today({ user, syncTick }) {
           { key: 'generate', text: aiWorking ? '生成中...' : '生成', disabled: aiWorking },
           {
             key: 'apply',
-            text: aiWorking ? '添加中...' : '一键加入任务',
+            text: '一键加入',
             bold: true,
             disabled: aiWorking || aiGeneratedTasks.length === 0,
           },
@@ -1842,44 +1858,70 @@ function Today({ user, syncTick }) {
           }
         }}
         content={
-          <div className="space-y-3">
-            <TextArea
-              placeholder="目标：例如「两周内把 React 基础打牢」"
-              value={aiGoal}
-              onChange={setAiGoal}
-              rows={3}
-              showCount
-              maxLength={200}
-            />
-            <TextArea
-              placeholder="约束（可选）：例如「每天 30 分钟，周末 2 小时」"
-              value={aiConstraints}
-              onChange={setAiConstraints}
-              rows={2}
-              showCount
-              maxLength={200}
-            />
+          <div className="space-y-4">
+            {/* Input Section */}
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">学习目标</label>
+                <TextArea
+                  placeholder="例如：两周内把 React 基础打牢"
+                  value={aiGoal}
+                  onChange={setAiGoal}
+                  rows={3}
+                  showCount
+                  maxLength={200}
+                  className="mt-1.5"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">约束条件（可选）</label>
+                <TextArea
+                  placeholder="例如：每天 30 分钟，周末 2 小时"
+                  value={aiConstraints}
+                  onChange={setAiConstraints}
+                  rows={2}
+                  showCount
+                  maxLength={200}
+                  className="mt-1.5"
+                />
+              </div>
+            </div>
 
+            {/* Preview Section */}
             {aiGeneratedTasks.length > 0 ? (
-              <div className="rounded-xl bg-slate-50 p-2">
-                <p className="px-2 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                  Preview
-                </p>
-                <List>
+              <div className="bg-gradient-to-br from-violet-50 to-indigo-50 rounded-2xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-5 h-5 rounded-md bg-violet-500 flex items-center justify-center">
+                    <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  </div>
+                  <span className="text-xs font-semibold text-violet-700 uppercase tracking-wider">任务预览</span>
+                  <span className="ml-auto text-xs text-violet-500">{aiGeneratedTasks.length} 个任务</span>
+                </div>
+                <div className="space-y-1.5">
                   {aiGeneratedTasks.map((task, index) => (
-                    <List.Item key={`${task.title}-${index}`}>
-                      <span className="text-slate-700">
+                    <div key={`${task.title}-${index}`} className="bg-white/80 rounded-xl px-3 py-2 flex items-center justify-between">
+                      <span className="text-sm text-slate-700">
                         {task.title}
-                        {task.estimateMinutes ? `（约${task.estimateMinutes}m）` : ''}
                       </span>
-                    </List.Item>
+                      {task.estimateMinutes && (
+                        <span className="text-xs text-violet-600 bg-violet-100 px-2 py-0.5 rounded-full">
+                          ~{task.estimateMinutes}m
+                        </span>
+                      )}
+                    </div>
                   ))}
-                </List>
+                </div>
               </div>
             ) : (
-              <p className="text-xs text-slate-400">
-                点击“生成”后会在这里预览任务列表。
-              </p>
+              <div className="bg-slate-50 rounded-xl p-4 text-center">
+                <svg className="w-8 h-8 text-slate-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <p className="text-xs text-slate-400">输入目标后点击"生成"预览任务列表</p>
+              </div>
             )}
           </div>
         }
@@ -1887,18 +1929,27 @@ function Today({ user, syncTick }) {
 
       <Dialog
         visible={aiAddOpen}
-        title="添加拆解任务"
+        title={
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
+              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+            </div>
+            <span className="text-sm font-semibold text-slate-800">添加拆解任务</span>
+          </div>
+        }
         closeOnMaskClick={!aiWorking}
         closeOnAction={false}
         onClose={() => {
           if (aiWorking) return
           setAiAddOpen(false)
         }}
-                actions={[
-          { key: 'cancel', text: '\u53d6\u6d88' },
+        actions={[
+          { key: 'cancel', text: '取消' },
           {
             key: 'submit',
-            text: aiWorking ? '\u6dfb\u52a0\u4e2d..' : '\u6dfb\u52a0',
+            text: aiWorking ? '添加中...' : '确认添加',
             bold: true,
             disabled: aiWorking,
           },
@@ -1913,9 +1964,13 @@ function Today({ user, syncTick }) {
           }
         }}
         content={
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-600">选择任务</span>
+          <div className="space-y-4">
+            {/* Select All */}
+            <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-slate-600">全选</span>
+                <span className="text-xs text-slate-400">({aiSelectedIds.length}/{aiTaskDrafts.length})</span>
+              </div>
               <Switch
                 checked={allAiSelected}
                 onChange={(value) => {
@@ -1923,7 +1978,9 @@ function Today({ user, syncTick }) {
                 }}
               />
             </div>
-            <List>
+
+            {/* Task List */}
+            <div className="space-y-2">
               {aiTaskDrafts.map((draft) => {
                 const metaParts = []
                 if (draft.plannedDate) {
@@ -1935,106 +1992,121 @@ function Today({ user, syncTick }) {
                 }
                 if (draft.priority) metaParts.push(`P${draft.priority}`)
                 const meta = metaParts.join(' · ')
+                const isSelected = aiSelectedIds.includes(draft.id)
                 return (
-                  <List.Item
+                  <div
                     key={draft.id}
-                    prefix={
+                    className={`bento-card bento-card-compact !p-3 transition-all ${isSelected ? '!ring-2 !ring-emerald-400' : ''}`}
+                  >
+                    <div className="flex items-start gap-3">
                       <Switch
-                        checked={aiSelectedIds.includes(draft.id)}
+                        checked={isSelected}
                         onChange={(value) => {
                           setAiSelectedIds((prev) =>
                             value ? [...prev, draft.id] : prev.filter((id) => id !== draft.id)
                           )
                         }}
                       />
-                    }
-                    description={meta || '未设置详情'}
-                    extra={
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800 truncate">
+                          {draft.title}
+                        </p>
+                        {meta && (
+                          <p className="text-xs text-slate-400 mt-0.5">{meta}</p>
+                        )}
+                        {draft.estimateMinutes && (
+                          <span className="inline-block mt-1 text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                            约{draft.estimateMinutes}分钟
+                          </span>
+                        )}
+                      </div>
                       <Button
                         size="mini"
                         fill="outline"
                         onClick={() => setAiEditingDraft(draft)}
+                        className="!rounded-full flex-shrink-0"
                       >
                         编辑
                       </Button>
-                    }
-                  >
-                    <span className="text-slate-700">
-                      {draft.title}
-                      {draft.estimateMinutes ? `（约${draft.estimateMinutes}m）` : ''}
-                    </span>
-                  </List.Item>
+                    </div>
+                  </div>
                 )
               })}
-            </List>
+            </div>
 
-            <div className="rounded-xl bg-slate-50 p-3 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                批量设置
-              </p>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-600">计划日期</span>
-                <Button size="small" fill="outline" onClick={() => setShowAiBatchDatePicker(true)}>
-                  {aiBatchPlannedDate ? dayjs(aiBatchPlannedDate).format('MM月DD日') : '选择日期'}
-                </Button>
-              </div>
-              {aiBatchPlannedDate && (
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-400">已选择</span>
+            {/* Batch Settings */}
+            <div className="bg-slate-50 rounded-xl p-3 space-y-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">批量设置</p>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-white rounded-xl px-3 py-2">
+                  <p className="text-[10px] text-slate-400 mb-1">计划日期</p>
                   <Button
-                    size="mini"
-                    fill="none"
-                    color="danger"
-                    onClick={() => {
-                      setAiBatchPlannedDate(null)
-                      applyBatchToSelected({ plannedDate: null })
-                    }}
+                    size="small"
+                    fill="outline"
+                    onClick={() => setShowAiBatchDatePicker(true)}
+                    className="!text-xs !h-7"
                   >
-                    清除日期
+                    {aiBatchPlannedDate ? dayjs(aiBatchPlannedDate).format('MM月DD日') : '选择'}
                   </Button>
                 </div>
-              )}
-              <Input
-                placeholder="截止时间（HH:mm）"
-                value={aiBatchDueTime}
-                onChange={(value) => {
-                  setAiBatchDueTime(value)
-                  applyBatchToSelected({ dueTime: value })
-                }}
-                clearable
-              />
-              <div className="space-y-2">
-                <span className="text-sm text-slate-600">优先级</span>
-                <Selector
-                  options={PRIORITY_OPTIONS}
-                  value={aiBatchPriority != null ? [aiBatchPriority] : []}
-                  onChange={(val) => {
-                    const next = val[0] ?? null
-                    setAiBatchPriority(next)
-                    applyBatchToSelected({ priority: next })
+                <div className="bg-white rounded-xl px-3 py-2">
+                  <p className="text-[10px] text-slate-400 mb-1">截止时间</p>
+                  <Input
+                    placeholder="HH:mm"
+                    value={aiBatchDueTime}
+                    onChange={(value) => {
+                      setAiBatchDueTime(value)
+                      applyBatchToSelected({ dueTime: value })
+                    }}
+                    clearable
+                    className="!text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-[10px] text-slate-400 mb-1">优先级</p>
+                  <Selector
+                    options={PRIORITY_OPTIONS}
+                    value={aiBatchPriority != null ? [aiBatchPriority] : []}
+                    onChange={(val) => {
+                      const next = val[0] ?? null
+                      setAiBatchPriority(next)
+                      applyBatchToSelected({ priority: next })
+                    }}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 mb-1">分类</p>
+                  <Input
+                    placeholder="可选"
+                    value={aiBatchCategory}
+                    onChange={(value) => {
+                      setAiBatchCategory(value)
+                      applyBatchToSelected({ category: value })
+                    }}
+                    clearable
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-[10px] text-slate-400 mb-1">标签</p>
+                <Input
+                  placeholder="逗号分隔"
+                  value={aiBatchLabels}
+                  onChange={(value) => {
+                    setAiBatchLabels(value)
+                    applyBatchToSelected({ labels: value })
                   }}
+                  clearable
                 />
               </div>
-              <Input
-                placeholder="分类（可选）"
-                value={aiBatchCategory}
-                onChange={(value) => {
-                  setAiBatchCategory(value)
-                  applyBatchToSelected({ category: value })
-                }}
-                clearable
-              />
-              <Input
-                placeholder="标签（逗号分隔）"
-                value={aiBatchLabels}
-                onChange={(value) => {
-                  setAiBatchLabels(value)
-                  applyBatchToSelected({ labels: value })
-                }}
-                clearable
-              />
-              <div className="space-y-2">
-                <span className="text-sm text-slate-600">重复</span>
+
+              <div>
+                <p className="text-[10px] text-slate-400 mb-1">重复</p>
                 <Selector
                   options={REPEAT_OPTIONS}
                   value={[aiBatchRepeatType]}
@@ -2049,15 +2121,18 @@ function Today({ user, syncTick }) {
                 />
               </div>
               {aiBatchRepeatType === 'weekly' && (
-                <Selector
-                  options={WEEKDAY_OPTIONS}
-                  value={aiBatchRepeatDays}
-                  multiple
-                  onChange={(val) => {
-                    setAiBatchRepeatDays(val)
-                    applyBatchToSelected({ repeatDays: val })
-                  }}
-                />
+                <div>
+                  <p className="text-[10px] text-slate-400 mb-1">重复日</p>
+                  <Selector
+                    options={WEEKDAY_OPTIONS}
+                    value={aiBatchRepeatDays}
+                    multiple
+                    onChange={(val) => {
+                      setAiBatchRepeatDays(val)
+                      applyBatchToSelected({ repeatDays: val })
+                    }}
+                  />
+                </div>
               )}
               <Input
                 placeholder="提醒时间（HH:mm，逗号分隔）"
@@ -2075,7 +2150,16 @@ function Today({ user, syncTick }) {
 
       <Dialog
         visible={!!aiEditingDraft}
-        title="编辑任务详情"
+        title={
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </div>
+            <span className="text-sm font-semibold text-slate-800">编辑任务</span>
+          </div>
+        }
         closeOnMaskClick
         onClose={() => setAiEditingDraft(null)}
         actions={[
@@ -2091,70 +2175,102 @@ function Today({ user, syncTick }) {
         }}
         content={
           <div className="space-y-3">
-            <Input
-              placeholder="任务内容"
-              value={aiEditingDraft?.title || ''}
-              onChange={(value) =>
-                setAiEditingDraft((prev) => (prev ? { ...prev, title: value } : prev))
-              }
-              clearable
-            />
-            <TextArea
-              placeholder="任务描述（可选）"
-              value={aiEditingDraft?.description || ''}
-              onChange={(value) =>
-                setAiEditingDraft((prev) => (prev ? { ...prev, description: value } : prev))
-              }
-              rows={3}
-              showCount
-              maxLength={200}
-            />
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-600">计划日期</span>
-              <Button size="small" fill="outline" onClick={() => setShowAiEditDatePicker(true)}>
-                {aiEditingDraft?.plannedDate
-                  ? dayjs(aiEditingDraft.plannedDate).format('MM月DD日')
-                  : '选择日期'}
-              </Button>
-            </div>
-            <Input
-              placeholder="截止时间（HH:mm）"
-              value={aiEditingDraft?.dueTime || ''}
-              onChange={(value) =>
-                setAiEditingDraft((prev) => (prev ? { ...prev, dueTime: value } : prev))
-              }
-              clearable
-            />
-            <div className="space-y-2">
-              <span className="text-sm text-slate-600">优先级</span>
-              <Selector
-                options={PRIORITY_OPTIONS}
-                value={aiEditingDraft?.priority != null ? [aiEditingDraft.priority] : []}
-                onChange={(val) =>
-                  setAiEditingDraft((prev) =>
-                    prev ? { ...prev, priority: val[0] ?? null } : prev
-                  )
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">任务内容</label>
+              <Input
+                placeholder="要做什么"
+                value={aiEditingDraft?.title || ''}
+                onChange={(value) =>
+                  setAiEditingDraft((prev) => (prev ? { ...prev, title: value } : prev))
                 }
+                clearable
+                className="mt-1"
               />
             </div>
-            <Input
-              placeholder="分类（可选）"
-              value={aiEditingDraft?.category || ''}
-              onChange={(value) =>
-                setAiEditingDraft((prev) => (prev ? { ...prev, category: value } : prev))
-              }
-              clearable
-            />
-            <Input
-              placeholder="标签（逗号分隔）"
-              value={aiEditingDraft?.labels || ''}
-              onChange={(value) =>
-                setAiEditingDraft((prev) => (prev ? { ...prev, labels: value } : prev))
-              }
-              clearable
-            />
-            <div className="space-y-2">
-              <span className="text-sm text-slate-600">重复</span>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">描述</label>
+              <TextArea
+                placeholder="补充说明（可选）"
+                value={aiEditingDraft?.description || ''}
+                onChange={(value) =>
+                  setAiEditingDraft((prev) => (prev ? { ...prev, description: value } : prev))
+                }
+                rows={2}
+                showCount
+                maxLength={200}
+                className="mt-1"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-slate-50 rounded-xl px-3 py-2">
+                <p className="text-[10px] text-slate-400 mb-1">计划日期</p>
+                <Button
+                  size="small"
+                  fill="outline"
+                  onClick={() => setShowAiEditDatePicker(true)}
+                  className="!text-xs !h-7 w-full"
+                >
+                  {aiEditingDraft?.plannedDate
+                    ? dayjs(aiEditingDraft.plannedDate).format('MM月DD日')
+                    : '选择'}
+                </Button>
+              </div>
+              <div className="bg-slate-50 rounded-xl px-3 py-2">
+                <p className="text-[10px] text-slate-400 mb-1">截止时间</p>
+                <Input
+                  placeholder="HH:mm"
+                  value={aiEditingDraft?.dueTime || ''}
+                  onChange={(value) =>
+                    setAiEditingDraft((prev) => (prev ? { ...prev, dueTime: value } : prev))
+                  }
+                  clearable
+                  className="!text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <p className="text-[10px] text-slate-400 mb-1">优先级</p>
+                <Selector
+                  options={PRIORITY_OPTIONS}
+                  value={aiEditingDraft?.priority != null ? [aiEditingDraft.priority] : []}
+                  onChange={(val) =>
+                    setAiEditingDraft((prev) =>
+                      prev ? { ...prev, priority: val[0] ?? null } : prev
+                    )
+                  }
+                />
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-400 mb-1">分类</p>
+                <Input
+                  placeholder="可选"
+                  value={aiEditingDraft?.category || ''}
+                  onChange={(value) =>
+                    setAiEditingDraft((prev) => (prev ? { ...prev, category: value } : prev))
+                  }
+                  clearable
+                />
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[10px] text-slate-400 mb-1">标签</p>
+              <Input
+                placeholder="逗号分隔"
+                value={aiEditingDraft?.labels || ''}
+                onChange={(value) =>
+                  setAiEditingDraft((prev) => (prev ? { ...prev, labels: value } : prev))
+                }
+                clearable
+              />
+            </div>
+
+            <div>
+              <p className="text-[10px] text-slate-400 mb-1">重复</p>
               <Selector
                 options={REPEAT_OPTIONS}
                 value={[aiEditingDraft?.repeatType || 'none']}
@@ -2172,23 +2288,30 @@ function Today({ user, syncTick }) {
               />
             </div>
             {aiEditingDraft?.repeatType === 'weekly' && (
-              <Selector
-                options={WEEKDAY_OPTIONS}
-                value={aiEditingDraft?.repeatDays || []}
-                multiple
-                onChange={(val) =>
-                  setAiEditingDraft((prev) => (prev ? { ...prev, repeatDays: val } : prev))
-                }
-              />
+              <div>
+                <p className="text-[10px] text-slate-400 mb-1">重复日</p>
+                <Selector
+                  options={WEEKDAY_OPTIONS}
+                  value={aiEditingDraft?.repeatDays || []}
+                  multiple
+                  onChange={(val) =>
+                    setAiEditingDraft((prev) => (prev ? { ...prev, repeatDays: val } : prev))
+                  }
+                />
+              </div>
             )}
-            <Input
-              placeholder="提醒时间（HH:mm，逗号分隔）"
-              value={aiEditingDraft?.reminderTimes || ''}
-              onChange={(value) =>
-                setAiEditingDraft((prev) => (prev ? { ...prev, reminderTimes: value } : prev))
-              }
-              clearable
-            />
+
+            <div>
+              <p className="text-[10px] text-slate-400 mb-1">提醒时间</p>
+              <Input
+                placeholder="HH:mm，逗号分隔"
+                value={aiEditingDraft?.reminderTimes || ''}
+                onChange={(value) =>
+                  setAiEditingDraft((prev) => (prev ? { ...prev, reminderTimes: value } : prev))
+                }
+                clearable
+              />
+            </div>
           </div>
         }
       />
