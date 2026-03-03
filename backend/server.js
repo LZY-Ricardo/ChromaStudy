@@ -16,6 +16,10 @@ const webpush = require("web-push");
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use((req, res, next) => {
+  console.log(`[REQUEST] ${req.method} ${req.url}`, { body: req.body });
+  next();
+});
 
 const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
 const ollamaModel = process.env.OLLAMA_MODEL || "llama3";
@@ -917,8 +921,9 @@ function toTaskTitle(text) {
 function asyncHandler(handler) {
   return (req, res) => {
     Promise.resolve(handler(req, res)).catch((error) => {
-      console.error(error);
-      res.status(500).json({ error: "Internal Server Error" });
+      console.error('Error details:', error.message);
+      console.error('Stack:', error.stack);
+      res.status(500).json({ error: "Internal Server Error", message: error.message });
     });
   };
 }
@@ -1087,8 +1092,10 @@ app.get("/api/health", (req, res) => {
 app.post(
   "/api/register",
   asyncHandler(async (req, res) => {
+    console.log('[REGISTER] Request body:', req.body);
     const username = normalizeUsername(req.body?.username);
     const password = normalizePassword(req.body?.password);
+    console.log('[REGISTER] Normalized - username:', username, 'password length:', password.length);
 
     if (!username || !password) {
       return res.status(400).json({ error: "username and password are required" });
