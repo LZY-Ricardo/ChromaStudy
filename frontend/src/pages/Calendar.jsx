@@ -4,6 +4,7 @@ import { Button, Card, Popup, ProgressBar, Toast } from 'antd-mobile'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getStudyLogs, getTaskOccurrences } from '../services/api.js'
+import WeeklyBarChart from '../components/charts/WeeklyBarChart.jsx'
 
 function getHeatColor(duration) {
   if (duration <= 0) return 'rgba(15, 23, 42, 0.04)'
@@ -104,13 +105,16 @@ function Calendar({ user, syncTick }) {
 
   const recentTrend = useMemo(() => {
     const today = dayjs()
-    const data = []
+    const chartData = []
+    const raw = []
     for (let i = 6; i >= 0; i -= 1) {
-      const date = today.subtract(i, 'day').format('YYYY-MM-DD')
-      data.push(Number(logMap.get(date)?.duration) || 0)
+      const date = today.subtract(i, 'day')
+      const key = date.format('YYYY-MM-DD')
+      const val = Number(logMap.get(key)?.duration) || 0
+      raw.push(val)
+      chartData.push({ key, label: i === 6 ? '今' : date.format('dd'), minutes: val })
     }
-    const max = Math.max(...data, 1)
-    return { data, max }
+    return { raw, chartData, max: Math.max(...raw, 1) }
   }, [logMap])
 
   const days = useMemo(() => {
@@ -232,20 +236,7 @@ function Calendar({ user, syncTick }) {
             </p>
           </div>
           <ProgressBar percent={weeklyProgress.percent} />
-          <div className="flex items-end gap-0.5 mt-3">
-            {recentTrend.data.map((val, idx) => {
-              const height = recentTrend.max ? Math.max(8, Math.round((val / recentTrend.max) * 32)) : 8
-              return (
-                <div key={idx} className="flex-1">
-                  <div
-                    className="w-full rounded-t-sm bg-emerald-400"
-                    style={{ height, opacity: 0.25 + (val > 0 ? 0.5 : 0) }}
-                  />
-                  <p className="mt-1 text-center text-[9px] text-slate-400">{idx === 6 ? '今' : ''}</p>
-                </div>
-              )
-            })}
-          </div>
+          <WeeklyBarChart data={recentTrend.chartData} height={36} />
         </Card>
       </div>
 
@@ -304,6 +295,7 @@ function Calendar({ user, syncTick }) {
                   day.inMonth ? 'text-slate-700' : 'text-slate-300'
                 }`}
                 style={{ backgroundColor: getHeatColor(day.duration) }}
+                title={day.inMonth ? `${day.date} · ${day.duration} min` : ''}
               >
                 {day.label}
               </button>

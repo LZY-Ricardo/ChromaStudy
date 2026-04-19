@@ -39,6 +39,7 @@ import { countDueReviewCards } from '../utils/flashcards.js'
 import { useNavigate } from 'react-router-dom'
 import ShareDialog from '../components/ShareCard.jsx'
 import { ensurePushSubscription } from '../utils/push.js'
+import MiniSparkline from '../components/charts/MiniSparkline.jsx'
 
 function SortableTaskItem({ task, disabled, onToggle }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -537,6 +538,16 @@ function Today({ user, syncTick }) {
       .filter((log) => log.date >= weekRange.start && log.date <= weekRange.end)
       .reduce((sum, log) => sum + (Number(log.duration) || 0), 0)
   }, [logs, weekRange])
+
+  const weeklyTrendData = useMemo(() => {
+    const map = new Map(logs.map((log) => [log.date, Number(log.duration) || 0]))
+    const data = []
+    for (let i = 6; i >= 0; i -= 1) {
+      const date = dayjs(todayKey).subtract(i, 'day').format('YYYY-MM-DD')
+      data.push({ value: map.get(date) || 0 })
+    }
+    return data
+  }, [logs, todayKey])
 
   const streakDays = useMemo(() => {
     const map = new Map(logs.map((log) => [log.date, log]))
@@ -1521,6 +1532,7 @@ function Today({ user, syncTick }) {
               <span className="text-slate-400 text-sm">/{weeklyGoalMinutes}</span>
             </div>
             <p className="text-[10px] text-slate-400 mt-2">连续打卡 {streakDays} 天</p>
+            <MiniSparkline data={weeklyTrendData} height={28} color="#34d399" />
             <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500"

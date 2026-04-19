@@ -7,6 +7,9 @@ import { generateReport, getStudyLogs } from '../services/api.js'
 import { loadWeeklyGoal } from '../utils/habit.js'
 import { loadAiConfig } from '../utils/storage.js'
 import ShareDialog from '../components/ShareCard.jsx'
+import WeeklyBarChart from '../components/charts/WeeklyBarChart.jsx'
+import WeeklyTrendChart from '../components/charts/WeeklyTrendChart.jsx'
+import DayDistributionChart from '../components/charts/DayDistributionChart.jsx'
 
 function Stats({ user, syncTick }) {
   const navigate = useNavigate()
@@ -114,6 +117,40 @@ function Stats({ user, syncTick }) {
   }, [logs, monthRange])
 
   const weekMax = Math.max(1, ...weekDays.map((day) => day.minutes))
+
+  const weeklyTrend = useMemo(() => {
+    const map = new Map(logs.map((log) => [log.date, Number(log.duration) || 0]))
+    const weeks = []
+    for (let w = 7; w >= 0; w -= 1) {
+      const weekStart = dayjs().subtract(w, 'week').startOf('week')
+      let total = 0
+      for (let d = 0; d < 7; d += 1) {
+        total += map.get(weekStart.add(d, 'day').format('YYYY-MM-DD')) || 0
+      }
+      weeks.push({
+        week: weekStart.format('MM/DD'),
+        minutes: total,
+      })
+    }
+    return weeks
+  }, [logs])
+
+  const dayDistribution = useMemo(() => {
+    const map = new Map(logs.map((log) => [log.date, Number(log.duration) || 0]))
+    const days = []
+    for (let d = 0; d < 7; d += 1) {
+      const dayOfWeek = dayjs().startOf('week').add(d, 'day')
+      const dow = dayOfWeek.day()
+      let total = 0
+      logs.forEach((log) => {
+        if (dayjs(log.date).day() === dow) {
+          total += Number(log.duration) || 0
+        }
+      })
+      days.push({ label: dayOfWeek.format('dd'), day: dayOfWeek.format('YYYY-MM-DD'), minutes: total })
+    }
+    return days
+  }, [logs])
 
   const requestReport = async (type) => {
     if (!user?.id) return
@@ -267,22 +304,44 @@ function Stats({ user, syncTick }) {
           </div>
 
           {/* Week Bar Chart */}
-          <div className="h-24">
-            <div className="grid h-full grid-cols-7 gap-1.5">
-              {weekDays.map((day) => (
-                <div key={day.key} className="flex flex-col items-center justify-end gap-1">
-                  <div className="flex h-full w-full items-end">
-                    <div
-                      className="w-full rounded-t-md bg-gradient-to-t from-emerald-500 to-emerald-400"
-                      style={{ height: `${Math.max(4, Math.round((day.minutes / weekMax) * 100))}%` }}
-                      title={`${day.key} · ${day.minutes} min`}
-                    />
-                  </div>
-                  <span className="text-[9px] font-medium text-slate-400">{day.label}</span>
-                </div>
-              ))}
+          <WeeklyBarChart data={weekDays} height={96} />
+        </div>
+      </Card>
+
+      {/* Weekly Trend Card */}
+      <Card className="bento-card">
+        <div className="flex items-center justify-between p-3 pb-2">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
+              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
             </div>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">周趋势</p>
           </div>
+          <span className="text-[10px] text-slate-400">近 8 周</span>
+        </div>
+        <div className="px-3 pb-3">
+          <WeeklyTrendChart data={weeklyTrend} height={120} />
+        </div>
+      </Card>
+
+      {/* Day Distribution Card */}
+      <Card className="bento-card">
+        <div className="flex items-center justify-between p-3 pb-2">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">学习分布</p>
+          </div>
+          <span className="text-[10px] text-slate-400">按星期</span>
+        </div>
+        <div className="px-3 pb-3 flex justify-center">
+          <DayDistributionChart data={dayDistribution} height={160} />
         </div>
       </Card>
 

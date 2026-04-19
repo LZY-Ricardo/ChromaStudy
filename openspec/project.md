@@ -11,10 +11,12 @@ ChromaStudy 是一款**移动优先的个人学习追踪与复习应用**（H5/P
 - 离线优先 PWA（本地缓存 + 同步队列 + 数据导出/导入）
 
 ## Tech Stack
-- **前端**: React 18 + Vite 7 + Ant Design Mobile 5 + Tailwind CSS v4
-- **后端**: Node.js + Express 5（单文件 server.js）
+- **前端**: React 18 + Vite 7 + Ant Design Mobile 5 + Tailwind CSS v4 + Recharts 3
+- **后端**: Node.js + Express 5（模块化路由架构）
 - **数据库**: MySQL（通过 Prisma 7 + MariaDB adapter）
 - **认证**: JWT（access 15min + refresh 30d，自实现）
+- **测试**: Vitest + supertest（后端），Vitest + React Testing Library（前端）
+- **可视化**: Recharts 3（柱状图、面积图、饼图、迷你趋势线）
 - **AI 集成**: Ollama（本地）或 OpenAI 兼容 API（云端，后端代理转发，不存储密钥）
 - **通知**: Web Push（VAPID，可选）
 - **包管理**: pnpm
@@ -37,13 +39,14 @@ ChromaStudy 是一款**移动优先的个人学习追踪与复习应用**（H5/P
 - **状态管理**: 仅 React `useState`/`useEffect`，跨组件通信使用自定义 DOM 事件（`window.dispatchEvent`）
 - **数据请求**: Axios 封装（`services/api.js`），拦截器自动刷新 JWT
 - **离线优先**: localStorage 缓存 + 合并策略 + 同步队列（`syncQueue.js`）
-- **后端**: 单文件 Express 服务器（`server.js`，约 2000 行），所有路由、中间件、定时任务集中在一个文件
+- **后端**: 模块化 Express 服务器（`server.js` ~80 行启动文件 + `routes/` + `middleware/` + `utils/` 目录）
 - **AI 代理模式**: 客户端每次请求携带完整 AI 配置，后端仅转发，不存储 API Key
 
 ### Testing Strategy
-- 当前**无正式测试框架**（未配置 Jest/Vitest/Mocha/Cypress）
-- 后端有少量**临时测试脚本**（`test-register.js`、`test-token.js` 等），为独立 Node 脚本，非测试套件
-- `package.json` 中无 `test` 脚本
+- **Vitest** 统一测试框架（前后端一致）
+- **后端**：`vitest` + `supertest`，单元测试（utils/）+ 集成测试（API 端点）
+- **前端**：`vitest` + `@testing-library/react` + `jsdom`，组件测试（Login、Stats、Calendar）
+- 运行方式：`pnpm test`（前后端目录各自运行）
 
 ### Git Workflow
 - **单分支开发**（仅 `main` 分支）
@@ -67,7 +70,7 @@ ChromaStudy 是一款**移动优先的个人学习追踪与复习应用**（H5/P
 
 ## Important Constraints
 - **前端仅限 JavaScript**，不使用 TypeScript（尽管安装了 `@types/react`）
-- **后端为单文件架构**（`server.js`），无路由/控制器拆分
+- **后端为 CommonJS 模块化架构**（`server.js` + `routes/` + `middleware/` + `utils/`）
 - **闪卡/复习数据仅存 localStorage**，非服务端，跨设备不同步
 - **AI API Key 仅存客户端 localStorage**，服务端不持久化任何密钥
 - **数据库为本地 MySQL**（`localhost:3306/chroma_study`），非云数据库
