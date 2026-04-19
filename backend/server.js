@@ -12,6 +12,7 @@ const { prisma } = require("./prismaClient");
 const { rrulestr } = require("rrule");
 const { CronJob } = require("cron");
 const webpush = require("web-push");
+const forumRoutes = require("./forumRoutes");
 
 const app = express();
 app.use(cors());
@@ -1084,6 +1085,8 @@ app.use((req, res, next) => {
   }
   return requireAccessToken(req, res, () => ensureUserIdConsistency(req, res, next));
 });
+
+app.use("/api/forum", forumRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ActionSheet, TabBar, Toast } from 'antd-mobile'
-import { BarChart3, CalendarDays, Home, MessageCircle, Settings as SettingsIcon } from 'lucide-react'
+import { BarChart3, CalendarDays, Home, MessageCircle, Settings as SettingsIcon, MessageSquare } from 'lucide-react'
 import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
 import Today from './pages/Today.jsx'
@@ -12,6 +12,15 @@ import DayDetail from './pages/DayDetail.jsx'
 import Stats from './pages/Stats.jsx'
 import Focus from './pages/Focus.jsx'
 import Review from './pages/Review.jsx'
+import Forum from './pages/Forum.jsx'
+import PostDetail from './pages/PostDetail.jsx'
+import CreatePost from './pages/CreatePost.jsx'
+import ForumProfile from './pages/ForumProfile.jsx'
+import CheckinWall from './pages/CheckinWall.jsx'
+import Groups from './pages/Groups.jsx'
+import GroupDetail from './pages/GroupDetail.jsx'
+import ForumNotifications from './pages/ForumNotifications.jsx'
+import ForumPrivacy from './pages/ForumPrivacy.jsx'
 import {
   loadAiConfig,
   loadAiState,
@@ -26,6 +35,7 @@ const tabs = [
   { key: '/', title: 'Today', icon: <Home size={18} /> },
   { key: '/calendar', title: 'Calendar', icon: <CalendarDays size={18} /> },
   { key: '/stats', title: 'Stats', icon: <BarChart3 size={18} /> },
+  { key: '/forum', title: 'Forum', icon: <MessageSquare size={18} /> },
   { key: '/chat', title: 'Mate', icon: <MessageCircle size={18} /> },
   { key: '/settings', title: 'Settings', icon: <SettingsIcon size={18} /> },
 ]
@@ -128,7 +138,14 @@ function Shell({ user, onLogout }) {
   const hideTabBar =
     location.pathname.startsWith('/day/') ||
     location.pathname === '/focus' ||
-    location.pathname.startsWith('/review')
+    location.pathname.startsWith('/review') ||
+    location.pathname.startsWith('/forum/post/') ||
+    location.pathname.startsWith('/forum/new') ||
+    location.pathname.startsWith('/forum/group/') ||
+    location.pathname.startsWith('/forum/profile/') ||
+    location.pathname === '/forum/checkin-wall' ||
+    location.pathname === '/forum/notifications' ||
+    location.pathname === '/forum/privacy'
 
   const shellClassName = hideTabBar ? 'app-shell app-shell--no-tabbar' : 'app-shell app-shell--tabbar'
 
@@ -248,6 +265,15 @@ function Shell({ user, onLogout }) {
           <Route path="/" element={<Today user={user} syncTick={syncTick} />} />
           <Route path="/calendar" element={<Calendar user={user} syncTick={syncTick} />} />
           <Route path="/stats" element={<Stats user={user} syncTick={syncTick} />} />
+          <Route path="/forum" element={<Forum user={user} />} />
+          <Route path="/forum/new" element={<CreatePost user={user} />} />
+          <Route path="/forum/post/:id" element={<PostDetail user={user} />} />
+          <Route path="/forum/profile/:userId" element={<ForumProfile user={user} />} />
+          <Route path="/forum/checkin-wall" element={<CheckinWall user={user} />} />
+          <Route path="/forum/groups" element={<Groups user={user} />} />
+          <Route path="/forum/group/:id" element={<GroupDetail user={user} />} />
+          <Route path="/forum/notifications" element={<ForumNotifications user={user} />} />
+          <Route path="/forum/privacy" element={<ForumPrivacy user={user} />} />
           <Route path="/chat" element={<Chat user={user} />} />
           <Route
             path="/settings"

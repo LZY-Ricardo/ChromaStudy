@@ -10,13 +10,21 @@ datasource db {
 }
 
 model User {
-  id                Int                @id @default(autoincrement())
-  username          String             @unique
-  password          String
-  studyLogs         StudyLog[]
-  tasks             Task[]
-  pushSubscriptions PushSubscription[]
-  refreshTokens     RefreshToken[]
+  id                    Int                    @id @default(autoincrement())
+  username              String                 @unique
+  password              String
+  forumPrivacySettings  String                 @default("{\"preset\":\"privacy\"}")
+  studyLogs             StudyLog[]
+  tasks                 Task[]
+  pushSubscriptions     PushSubscription[]
+  refreshTokens         RefreshToken[]
+  posts                 Post[]
+  comments              Comment[]
+  postLikes             PostLike[]
+  commentLikes          CommentLike[]
+  studyGroups           StudyGroupMember[]
+  createdGroups         StudyGroup[]         @relation("GroupCreator")
+  forumNotifications    ForumNotification[]
 }
 
 model RefreshToken {
@@ -34,16 +42,18 @@ model RefreshToken {
 }
 
 model StudyLog {
-  id         Int     @id @default(autoincrement())
-  date       String
-  duration   Int
-  content    String
-  aiFeedback String?
-  userId     Int
-  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           Int     @id @default(autoincrement())
+  date         String
+  duration     Int
+  content      String
+  aiFeedback   String?
+  sharedToWall Boolean @default(false)
+  userId       Int
+  user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, date])
   @@index([date])
+  @@index([sharedToWall])
 }
 
 model Task {
@@ -119,4 +129,110 @@ model PushSubscription {
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model Post {
+  id          Int       @id @default(autoincrement())
+  title       String
+  content     String
+  isAnonymous Boolean   @default(false)
+  studyCard   String?   // JSON
+  groupId     Int?
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group       StudyGroup?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  comments    Comment[]
+  likes       PostLike[]
+  notifications ForumNotification[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([groupId])
+  @@index([createdAt])
+}
+
+model Comment {
+  id          Int           @id @default(autoincrement())
+  content     String
+  isAnonymous Boolean       @default(false)
+  postId      Int
+  post        Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId      Int
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  likes       CommentLike[]
+  notifications ForumNotification[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([postId])
+  @@index([userId])
+}
+
+model PostLike {
+  id     Int  @id @default(autoincrement())
+  postId Int
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+}
+
+model CommentLike {
+  id        Int     @id @default(autoincrement())
+  commentId Int
+  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+}
+
+model StudyGroup {
+  id          Int                 @id @default(autoincrement())
+  name        String
+  description String?
+  tags        String?             // JSON
+  creatorId   Int
+  creator     User                @relation("GroupCreator", fields: [creatorId], references: [id])
+  members     StudyGroupMember[]
+  posts       Post[]
+  notifications ForumNotification[]
+  createdAt   DateTime            @default(now())
+
+  @@index([creatorId])
+}
+
+model StudyGroupMember {
+  id       Int        @id @default(autoincrement())
+  groupId  Int
+  group    StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId   Int
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     String     @default("member")
+  joinedAt DateTime  @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId])
+}
+
+model ForumNotification {
+  id               Int      @id @default(autoincrement())
+  type             String
+  userId           Int
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  relatedPost      Post?    @relation(fields: [relatedPostId], references: [id], onDelete: SetNull)
+  relatedComment   Comment? @relation(fields: [relatedCommentId], references: [id], onDelete: SetNull)
+  relatedGroup     StudyGroup? @relation(fields: [relatedGroupId], references: [id], onDelete: SetNull)
+  relatedPostId    Int?
+  relatedCommentId Int?
+  relatedGroupId   Int?
+  isRead           Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@index([relatedPostId])
+  @@index([relatedCommentId])
 }

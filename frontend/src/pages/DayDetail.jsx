@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Card, Dialog, Input, TextArea, Toast } from 'antd-mobile'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Share2 } from 'lucide-react'
+import { toggleShareStudyLog } from '../services/forumApi.js'
 import {
   checkin,
   generateAiFeedback,
@@ -26,6 +27,7 @@ function DayDetail({ user, syncTick }) {
   const [reviewQuestions, setReviewQuestions] = useState([])
   const [reviewAnswers, setReviewAnswers] = useState({})
   const [reviewWorking, setReviewWorking] = useState(false)
+  const [sharedToWall, setSharedToWall] = useState(false)
 
   const load = async () => {
     if (!user?.id || !validDate) return
@@ -33,6 +35,7 @@ function DayDetail({ user, syncTick }) {
     try {
       const data = await getStudyLogByDate(user.id, normalizedDate)
       setLog(data)
+      setSharedToWall(!!data?.sharedToWall)
     } catch {
       Toast.show({ content: '加载失败，请稍后重试' })
     } finally {
@@ -134,6 +137,17 @@ function DayDetail({ user, syncTick }) {
     }
   }
 
+  const toggleShare = async () => {
+    if (!log?.id) return
+    try {
+      const result = await toggleShareStudyLog(log.id, !sharedToWall)
+      setSharedToWall(result.sharedToWall)
+      Toast.show({ content: result.sharedToWall ? '已分享到打卡墙' : '已取消分享' })
+    } catch {
+      Toast.show({ content: '操作失败' })
+    }
+  }
+
   const generateReview = async () => {
     if (!user?.id || !validDate) return
     if (!log?.duration || log.duration <= 0) {
@@ -217,9 +231,25 @@ function DayDetail({ user, syncTick }) {
               {log ? `学习时长：${log.duration} 分钟` : '当天暂无打卡'}
             </p>
           </div>
-          <Button size="small" color="primary" fill="outline" onClick={openEditor} disabled={loading}>
-            {log ? '编辑' : '新增'}
-          </Button>
+          <div className="flex items-center gap-2">
+            {log && (
+              <button
+                type="button"
+                className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border transition-colors ${
+                  sharedToWall
+                    ? 'border-emerald-400 text-emerald-600 bg-emerald-50'
+                    : 'border-slate-200 text-slate-400'
+                }`}
+                onClick={toggleShare}
+              >
+                <Share2 size={12} />
+                {sharedToWall ? '已分享' : '分享'}
+              </button>
+            )}
+            <Button size="small" color="primary" fill="outline" onClick={openEditor} disabled={loading}>
+              {log ? '编辑' : '新增'}
+            </Button>
+          </div>
         </div>
       </Card>
 
