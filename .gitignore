@@ -1,3 +1,4 @@
 nul
 backend/dev.db
 .claude/settings.local.json
+.claude/commands/
