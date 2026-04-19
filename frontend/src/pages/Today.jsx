@@ -2622,13 +2622,13 @@ function Today({ user, syncTick }) {
               </div>
             )}
             <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-              <span className="text-sm text-slate-600">{'\u66f4\u591a\u8bbe\u7f6e'}</span>
+              <span className="text-sm text-slate-600">更多设置</span>
               <Switch checked={editDetailOpen} onChange={(value) => setEditDetailOpen(value)} />
             </div>
             {editDetailOpen && (
               <div className="space-y-3">
                 <TextArea
-                  placeholder="\u4efb\u52a1\u63cf\u8ff0\uff08\u53ef\u9009\uff09"
+                  placeholder="任务描述（可选）"
                   value={editingDescription}
                   onChange={setEditingDescription}
                   rows={3}
@@ -2636,13 +2636,13 @@ function Today({ user, syncTick }) {
                   maxLength={200}
                 />
                 <Input
-                  placeholder="\u622a\u6b62\u65f6\u95f4\uff08HH:mm\uff09"
+                  placeholder="截止时间（HH:mm）"
                   value={editingDueTime}
                   onChange={setEditingDueTime}
                   clearable
                 />
                 <div className="space-y-2">
-                  <span className="text-sm text-slate-600">{'\u4f18\u5148\u7ea7'}</span>
+                  <span className="text-sm text-slate-600">优先级</span>
                   <Selector
                     options={PRIORITY_OPTIONS}
                     value={editingPriority != null ? [editingPriority] : []}
@@ -2656,20 +2656,20 @@ function Today({ user, syncTick }) {
                     onChange={setEditingCategory}
                   />
                   <Input
-                    placeholder="\u5206\u7c7b\uff08\u53ef\u9009\uff09"
+                    placeholder="分类（可选）"
                     value={editingCategory}
                     onChange={setEditingCategory}
                     clearable
                   />
                 </div>
                 <Input
-                  placeholder="\u6807\u7b7e\uff08\u9017\u53f7\u5206\u9694\uff09"
+                  placeholder="标签（逗号分隔）"
                   value={editingLabels}
                   onChange={setEditingLabels}
                   clearable
                 />
                 <div className="space-y-2">
-                  <span className="text-sm text-slate-600">{'\u91cd\u590d'}</span>
+                  <span className="text-sm text-slate-600">重复</span>
                   <Selector
                     options={REPEAT_OPTIONS}
                     value={[editingRepeatType]}
@@ -2691,7 +2691,7 @@ function Today({ user, syncTick }) {
                   />
                 )}
                 <Input
-                  placeholder="\u63d0\u9192\u65f6\u95f4\uff08HH:mm\uff0c\u9017\u53f7\u5206\u9694\uff09"
+                  placeholder="提醒时间（HH:mm，逗号分隔）"
                   value={editingReminderTimes}
                   onChange={setEditingReminderTimes}
                   clearable
@@ -2771,13 +2771,13 @@ function Today({ user, syncTick }) {
               </div>
             )}
             <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-              <span className="text-sm text-slate-600">{'\u66f4\u591a\u8bbe\u7f6e'}</span>
+              <span className="text-sm text-slate-600">更多设置</span>
               <Switch checked={taskDetailOpen} onChange={(value) => setTaskDetailOpen(value)} />
             </div>
             {taskDetailOpen && (
               <div className="space-y-3">
                 <TextArea
-                  placeholder="\u4efb\u52a1\u63cf\u8ff0\uff08\u53ef\u9009\uff09"
+                  placeholder="任务描述（可选）"
                   value={taskDescription}
                   onChange={setTaskDescription}
                   rows={3}
@@ -2785,13 +2785,13 @@ function Today({ user, syncTick }) {
                   maxLength={200}
                 />
                 <Input
-                  placeholder="\u622a\u6b62\u65f6\u95f4\uff08HH:mm\uff09"
+                  placeholder="截止时间（HH:mm）"
                   value={taskDueTime}
                   onChange={setTaskDueTime}
                   clearable
                 />
                 <div className="space-y-2">
-                  <span className="text-sm text-slate-600">{'\u4f18\u5148\u7ea7'}</span>
+                  <span className="text-sm text-slate-600">优先级</span>
                   <Selector
                     options={PRIORITY_OPTIONS}
                     value={taskPriority != null ? [taskPriority] : []}
@@ -2805,20 +2805,20 @@ function Today({ user, syncTick }) {
                     onChange={setTaskCategory}
                   />
                   <Input
-                    placeholder="\u5206\u7c7b\uff08\u53ef\u9009\uff09"
+                    placeholder="分类（可选）"
                     value={taskCategory}
                     onChange={setTaskCategory}
                     clearable
                   />
                 </div>
                 <Input
-                  placeholder="\u6807\u7b7e\uff08\u9017\u53f7\u5206\u9694\uff09"
+                  placeholder="标签（逗号分隔）"
                   value={taskLabels}
                   onChange={setTaskLabels}
                   clearable
                 />
                 <div className="space-y-2">
-                  <span className="text-sm text-slate-600">{'\u91cd\u590d'}</span>
+                  <span className="text-sm text-slate-600">重复</span>
                   <Selector
                     options={REPEAT_OPTIONS}
                     value={[taskRepeatType]}
@@ -2840,7 +2840,7 @@ function Today({ user, syncTick }) {
                   />
                 )}
                 <Input
-                  placeholder="\u63d0\u9192\u65f6\u95f4\uff08HH:mm\uff0c\u9017\u53f7\u5206\u9694\uff09"
+                  placeholder="提醒时间（HH:mm，逗号分隔）"
                   value={taskReminderTimes}
                   onChange={setTaskReminderTimes}
                   clearable

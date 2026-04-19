@@ -103,6 +103,27 @@ function isNetworkError(error) {
   return !error?.response
 }
 
+function decodeEscapedUnicodeText(value) {
+  if (typeof value !== 'string') return value
+  if (!/\\u[0-9a-fA-F]{4}/.test(value)) return value
+  return value.replace(/\\u([0-9a-fA-F]{4})/g, (_, code) =>
+    String.fromCharCode(Number.parseInt(code, 16))
+  )
+}
+
+function normalizeTaskTextFields(task) {
+  if (!task || typeof task !== 'object') return task
+  return {
+    ...task,
+    title: decodeEscapedUnicodeText(task.title),
+    description: decodeEscapedUnicodeText(task.description),
+    category: decodeEscapedUnicodeText(task.category),
+    labels: Array.isArray(task.labels)
+      ? task.labels.map((item) => decodeEscapedUnicodeText(item))
+      : task.labels,
+  }
+}
+
 function cacheKey(prefix, userId) {
   return `chroma_cache_${prefix}_${userId}`
 }
@@ -169,13 +190,18 @@ function mergeTasksWithCache(userId, serverTasks) {
 
   const key = cacheKey('tasks', userId)
   const cached = loadCache(key)
-  const map = new Map((Array.isArray(serverTasks) ? serverTasks : []).map((task) => [task?.id, task]))
+  const map = new Map(
+    (Array.isArray(serverTasks) ? serverTasks : []).map((task) => {
+      const normalized = normalizeTaskTextFields(task)
+      return [normalized?.id, normalized]
+    })
+  )
 
   if (Array.isArray(cached)) {
     for (const task of cached) {
       if (!task || !Number.isFinite(task.id)) continue
       if (task.id <= 0 || task?._offline || pendingUpdateIds.has(task.id)) {
-        map.set(task.id, task)
+        map.set(task.id, normalizeTaskTextFields(task))
       }
     }
   }
@@ -392,7 +418,9 @@ export async function getTasks(userId) {
     return merged
   } catch (error) {
     const cached = loadCache(key)
-    if (cached) return cached
+    if (cached) {
+      return Array.isArray(cached) ? cached.map((item) => normalizeTaskTextFields(item)) : cached
+    }
     throw error
   }
 }
@@ -402,7 +430,9 @@ export async function getTaskOccurrences(userId, start, end) {
   if (start) params.start = start
   if (end) params.end = end
   const { data } = await api.get('/api/task-occurrences', { params })
-  return Array.isArray(data?.items) ? data.items : []
+  return Array.isArray(data?.items)
+    ? data.items.map((item) => normalizeTaskTextFields(item))
+    : []
 }
 
 export async function createTask(userId, payload) {
@@ -412,8 +442,9 @@ export async function createTask(userId, payload) {
       : { title: typeof payload === 'string' ? payload : '' }
   try {
     const { data } = await api.post('/api/tasks', { userId, ...taskPayload })
-    appendTaskCache(userId, data)
-    return data
+    const normalized = normalizeTaskTextFields(data)
+    appendTaskCache(userId, normalized)
+    return normalized
   } catch (error) {
     if (!isNetworkError(error)) {
       throw error
@@ -488,8 +519,9 @@ export async function updateTask(userId, id, updates) {
 
   try {
     const data = await patchTaskNetwork(normalizedId, updates)
-    applyTaskCache(userId, data)
-    return data
+    const normalized = normalizeTaskTextFields(data)
+    applyTaskCache(userId, normalized)
+    return normalized
   } catch (error) {
     if (!isNetworkError(error)) {
       throw error
@@ -532,7 +564,7 @@ export async function updateTaskOccurrence(userId, taskId, occurrenceDate, updat
     occurrenceDate,
     updates,
   })
-  return data?.item ?? null
+  return data?.item ? normalizeTaskTextFields(data.item) : null
 }
 
 async function deleteTaskNetwork(userId, id) {
@@ -658,10 +690,11 @@ export async function syncPendingOps(userId) {
         }
 
         const { data } = await api.post('/api/tasks', { userId, ...taskPayload })
-        replaceTaskInCache(userId, tempId, data)
-        replaceTaskIdInOrder(userId, tempId, data.id)
-        replaceQueuedTaskId(userId, tempId, data.id)
-        tempTaskIdMap.set(tempId, data.id)
+        const normalized = normalizeTaskTextFields(data)
+        replaceTaskInCache(userId, tempId, normalized)
+        replaceTaskIdInOrder(userId, tempId, normalized.id)
+        replaceQueuedTaskId(userId, tempId, normalized.id)
+        tempTaskIdMap.set(tempId, normalized.id)
 
         completedIds.push(op.id)
         succeeded += 1
@@ -672,7 +705,7 @@ export async function syncPendingOps(userId) {
         const { id, updates } = op.payload || {}
         const actualId = tempTaskIdMap.get(id) ?? id
         const data = await patchTaskNetwork(actualId, updates)
-        applyTaskCache(userId, data)
+        applyTaskCache(userId, normalizeTaskTextFields(data))
         completedIds.push(op.id)
         succeeded += 1
         continue
