@@ -1,63 +1,44 @@
 # ChromaStudy
 
-移动端优先的学习打卡 + 复盘应用，内置 AI 助手能力，支持本地 Ollama 与云端 OpenAI 兼容接口作为 AI Provider。
+移动端优先的学习打卡 + 复盘应用，内置 AI 助手能力，支持本地 Ollama 与云端 OpenAI 兼容接口。
 
-## 开发启动
-
-### 后端
+## 快速启动
 
 ```bash
-cd backend
-pnpm start
+# 后端（默认 http://localhost:3001）
+cd backend && pnpm install && pnpm start
+
+# 前端（默认 http://localhost:5173）
+cd frontend && pnpm install && pnpm dev
 ```
 
-默认监听 `http://localhost:3001`。
+环境变量参考 `backend/.env.example`。
 
-### 前端
+## 功能概览
 
-```bash
-cd frontend
-pnpm dev
-```
+- 学习打卡 + AI 点评（Ollama / 云端 LLM）
+- 任务管理（重复任务、提醒、拖拽排序）
+- 日历热力图 + 统计（周目标、streak、AI 周报/月报）
+- AI 学习伙伴（SSE 流式对话）、任务拆解、复盘追问
+- 番茄钟 + 答题复习（SM-2 间隔重复）
+- 离线缓存 + 待同步队列 + 数据导出/导入
+- PWA（可安装、Web Push 通知）
 
-默认监听 `http://localhost:5173`。
+## 技术栈
 
-## 认证（JWT）
+- **前端**：Vite + React 18 + React Router + Ant Design Mobile + Tailwind CSS
+- **后端**：Node.js + Express + Prisma ORM
+- **数据库**：SQLite
+- **AI**：Ollama（本地）/ OpenAI 兼容接口（云端，后端转发）
 
-前端提供独立页面：
+## 文档
 
-- `GET /login`：登录
-- `GET /register`：注册
+| 文档 | 说明 |
+|---|---|
+| [使用与开发指南](docs/GUIDE.md) | 完整功能说明、API 文档、配置、FAQ |
+| [架构设计](docs/ARCHITECTURE.md) | 初始设计稿（历史参考） |
+| [开发路线图](docs/ROADMAP.md) | 分期规划与未完成设计 |
 
-后端认证接口：
+## License
 
-- `POST /api/register`：注册并返回 `accessToken/refreshToken`
-- `POST /api/login`：登录并返回 `accessToken/refreshToken`
-- `POST /api/refresh`：使用 `refreshToken` 轮换刷新
-- `POST /api/logout`：撤销 `refreshToken`
-- `GET /api/me`：获取当前登录用户
-
-Token 传递方式：
-
-- `accessToken`：前端通过 `Authorization: Bearer <token>` 访问受保护 API
-- 过期处理：收到 `401` 时前端会自动调用 `/api/refresh` 刷新并重试请求
-
-可配置项：参考 `backend/.env.example`
-
-## AI Provider 配置（Settings）
-
-- **Ollama（本地）**
-  - `Host`：默认 `http://localhost:11434`
-  - `Model`：例如 `llama3`
-  - 可从设置页直接跳转到 Ollama 官网/模型库/文档
-- **云端（OpenAI兼容）**
-  - 选择 `Cloud Preset` 会自动填入 `Base URL` + 默认 `Model`
-  - 常用路径只需粘贴 `API Key`
-  - 如需自定义 `Base URL/Model`，打开「高级设置」
-  - 「测试连接」会通过后端验证配置连通性
-
-安全提示：云端模式会把 `API Key` 发送到你的后端用于转发请求；请仅在可信环境使用。
-
-## 后端接口
-
-- `POST /api/ai/ping`：验证当前 AI 配置连通性（供设置页「测试连接」调用）
+Private
